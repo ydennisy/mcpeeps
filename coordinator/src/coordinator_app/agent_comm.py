@@ -10,15 +10,16 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 import httpx
-from fasta2a.schema import Artifact, GetTaskRequest, Message, Task, TaskState, TextPart
+from fasta2a.schema import Artifact, CancelTaskRequest, GetTaskRequest, Message, Task, TaskState, TextPart
 
 try:  # pragma: no cover - compatibility for older schema versions
-    from fasta2a.schema import get_task_request_ta, get_task_response_ta
+    from fasta2a.schema import cancel_task_request_ta, get_task_request_ta, get_task_response_ta
 except ImportError:  # pragma: no cover - fallback when type adapters are unavailable
-    from fasta2a.schema import GetTaskResponse, TypeAdapter
+    from fasta2a.schema import CancelTaskRequest as CancelTaskRequestType, GetTaskResponse, TypeAdapter
 
     get_task_request_ta = TypeAdapter(GetTaskRequest)
     get_task_response_ta = TypeAdapter(GetTaskResponse)
+    cancel_task_request_ta = TypeAdapter(CancelTaskRequestType)
 
 
 ALL_TASK_STATES: set[TaskState] = cast(
@@ -305,6 +306,47 @@ async def wait_for_task_completion(
         if remaining <= 0:
             raise TimeoutError(f'Timed out waiting for task {task_id} to complete (last state: {state}).')
         await asyncio.sleep(min(poll_interval, max(remaining, 0)))
+
+
+async def cancel_agent_task(
+    *,
+    agent: dict[str, str],
+    task_id: str,
+    http_client: httpx.AsyncClient,
+    reason: str | None = None,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """Issue a cancel request for a task to the given agent."""
+
+    request: CancelTaskRequest = {
+        'jsonrpc': '2.0',
+        'id': str(uuid.uuid4()),
+        'method': 'tasks/cancel',
+        'params': {'id': task_id},
+    }
+
+    if reason:
+        request['params']['metadata'] = {'reason': reason}
+
+    serialized_request = cancel_task_request_ta.dump_python(request, by_alias=True)
+    response = await http_client.post(
+        f"{agent['url']}/",
+        json=serialized_request,
+        timeout=min(timeout, 30.0),
+    )
+    response.raise_for_status()
+    payload = response.json()
+
+    if 'error' in payload:
+        error = payload['error']
+        raise RuntimeError(
+            f"Agent returned error while canceling task {task_id}: {error.get('message', error)}"
+        )
+
+    result = payload.get('result')
+    if isinstance(result, dict):
+        return cast(dict[str, Any], result)
+    return {}
 
 
 async def send_message_and_submit_task(

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Any
 
 import httpx
-from fastapi import FastAPI, Form, Query, BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, Form, Query
 from fastapi.responses import HTMLResponse
 from fasta2a import FastA2A
 from fasta2a.broker import InMemoryBroker
@@ -17,8 +19,10 @@ from fasta2a.storage import InMemoryStorage
 
 from .agent_comm import (
     AgentReply,
+    TERMINAL_TASK_STATES,
     broadcast_agent_reply,
     build_agent_message,
+    cancel_agent_task,
     send_message_and_collect,
     send_message_and_submit_task,
     poll_task_update,
@@ -42,6 +46,10 @@ conversation_tasks: dict[str, dict] = {}
 # Track active tasks for task ID -> context mapping
 active_tasks: dict[str, dict] = {}
 
+# Track a bounded history of recent task IDs for cancellation lookups
+RECENT_TASK_LIMIT = 200
+recent_task_ids: deque[str] = deque(maxlen=RECENT_TASK_LIMIT)
+
 
 @asynccontextmanager
 async def lifespan(a2a_app: FastA2A) -> AsyncIterator[None]:
@@ -55,6 +63,137 @@ a2a_app = FastA2A(storage=storage, broker=broker, lifespan=lifespan)
 api = FastAPI(title="MCPeeps")
 
 
+async def cancel_context_tasks(context_id: str, reason: str | None = None) -> list[dict[str, Any]]:
+    """Send cancel requests for the most recent tasks tied to a context."""
+
+    context_entry = conversation_tasks.get(context_id)
+    tasks_map = context_entry.setdefault("tasks", {}) if context_entry else {}
+
+    tasks_to_cancel: list[tuple[str, dict[str, Any] | None, dict[str, Any] | None]] = []
+    seen: set[str] = set()
+
+    for task_id, record in tasks_map.items():
+        status = record.get('status', 'unknown')
+        if status in TERMINAL_TASK_STATES:
+            continue
+        active_entry = active_tasks.get(task_id)
+        if active_entry and active_entry.get('status') in TERMINAL_TASK_STATES:
+            continue
+        if record.get('cancel_sent') or (active_entry and active_entry.get('cancel_sent')):
+            continue
+        tasks_to_cancel.append((task_id, record, active_entry))
+        seen.add(task_id)
+
+    for task_id in reversed(recent_task_ids):
+        if task_id in seen:
+            continue
+        active_entry = active_tasks.get(task_id)
+        if not active_entry or active_entry.get('context_id') != context_id:
+            continue
+        status = active_entry.get('status', 'unknown')
+        if status in TERMINAL_TASK_STATES:
+            continue
+        if active_entry.get('cancel_sent'):
+            continue
+        record = tasks_map.get(task_id) if context_entry else None
+        if context_entry and record is None:
+            agent_copy = dict(active_entry.get('agent') or {})
+            record = {
+                'task_id': task_id,
+                'status': status,
+                'agent_name': agent_copy.get('name'),
+                'agent': agent_copy,
+                'created_at': active_entry.get('created_at'),
+                'updated_at': active_entry.get('updated_at'),
+                'cancel_sent': active_entry.get('cancel_sent', False),
+            }
+            tasks_map[task_id] = record
+        tasks_to_cancel.append((task_id, record, active_entry))
+        seen.add(task_id)
+
+    if not tasks_to_cancel:
+        return []
+
+    cancel_results: list[dict[str, Any]] = []
+    async with httpx.AsyncClient() as client:
+        for task_id, record, active_entry in tasks_to_cancel:
+            agent_info: dict[str, Any] | None = None
+            if record and isinstance(record.get('agent'), dict):
+                agent_info = record['agent']
+            elif active_entry and isinstance(active_entry.get('agent'), dict):
+                agent_info = active_entry['agent']
+
+            agent_name = agent_info.get('name') if isinstance(agent_info, dict) else 'unknown'
+
+            if not isinstance(agent_info, dict) or not agent_info.get('url'):
+                timestamp = datetime.now(timezone.utc).isoformat()
+                message = 'Agent information missing; unable to send cancel request.'
+                if record is not None:
+                    record['cancel_error'] = message
+                    record['updated_at'] = timestamp
+                if active_entry is not None:
+                    active_entry['cancel_error'] = message
+                    active_entry['updated_at'] = timestamp
+                cancel_results.append(
+                    {
+                        'task_id': task_id,
+                        'agent': agent_name,
+                        'status': 'skipped',
+                        'reason': message,
+                    }
+                )
+                continue
+
+            try:
+                await cancel_agent_task(
+                    agent=agent_info,
+                    task_id=task_id,
+                    http_client=client,
+                    reason=reason,
+                )
+                timestamp = datetime.now(timezone.utc).isoformat()
+                if record is not None:
+                    record['status'] = 'cancel_requested'
+                    record['cancel_sent'] = True
+                    if reason:
+                        record['cancel_reason'] = reason
+                    record['updated_at'] = timestamp
+                    record.pop('cancel_error', None)
+                if active_entry is not None:
+                    active_entry['status'] = 'cancel_requested'
+                    active_entry['cancel_sent'] = True
+                    if reason:
+                        active_entry['cancel_reason'] = reason
+                    active_entry['updated_at'] = timestamp
+                    active_entry.pop('cancel_error', None)
+                cancel_results.append(
+                    {
+                        'task_id': task_id,
+                        'agent': agent_name,
+                        'status': 'cancel_requested',
+                    }
+                )
+            except Exception as exc:  # pragma: no cover - best effort cancellation
+                timestamp = datetime.now(timezone.utc).isoformat()
+                error_text = str(exc)
+                if record is not None:
+                    record['cancel_error'] = error_text
+                    record['updated_at'] = timestamp
+                if active_entry is not None:
+                    active_entry['cancel_error'] = error_text
+                    active_entry['updated_at'] = timestamp
+                cancel_results.append(
+                    {
+                        'task_id': task_id,
+                        'agent': agent_name,
+                        'status': 'error',
+                        'error': error_text,
+                    }
+                )
+
+    return cancel_results
+
+
 async def process_conversation_background(
     context_id: str,
     user_message: Message,
@@ -65,6 +204,7 @@ async def process_conversation_background(
     existing_task = conversation_tasks.get(context_id)
     cancel_requested_initial = bool(existing_task and existing_task.get("cancel_requested"))
     cancel_reason_initial = existing_task.get("cancel_reason") if existing_task else None
+    existing_tasks = dict(existing_task.get("tasks", {})) if existing_task else {}
 
     task_state = {
         "status": "cancel_requested" if cancel_requested_initial else "running",
@@ -75,8 +215,10 @@ async def process_conversation_background(
         "total_messages": 0,
         "cancel_requested": cancel_requested_initial,
         "cancel_reason": cancel_reason_initial,
+        "tasks": existing_tasks,
     }
     conversation_tasks[context_id] = task_state
+    task_records = conversation_tasks[context_id].setdefault("tasks", {})
 
     context = await storage.load_context(context_id) or []
     collected_replies: list[AgentReply] = []
@@ -169,11 +311,27 @@ async def process_conversation_background(
                     # If it's a task, track it for polling
                     if reply.task_id:
                         pending_tasks.append((agent, reply.task_id))
+                        timestamp = datetime.now(timezone.utc).isoformat()
+                        agent_snapshot = dict(agent)
+                        task_records[reply.task_id] = {
+                            'task_id': reply.task_id,
+                            'status': 'submitted',
+                            'agent_name': agent_snapshot.get('name'),
+                            'agent': agent_snapshot,
+                            'created_at': timestamp,
+                            'updated_at': timestamp,
+                            'cancel_sent': False,
+                        }
                         active_tasks[reply.task_id] = {
                             'context_id': context_id,
-                            'agent': agent,
-                            'status': 'submitted'
+                            'agent': agent_snapshot,
+                            'agent_name': agent_snapshot.get('name'),
+                            'status': 'submitted',
+                            'created_at': timestamp,
+                            'updated_at': timestamp,
+                            'cancel_sent': False,
                         }
+                        recent_task_ids.append(reply.task_id)
 
                 except Exception as exc:
                     error_text = f"Error contacting agent: {exc}"
@@ -195,7 +353,6 @@ async def process_conversation_background(
                 if is_cancel_requested():
                     mark_canceled("Canceled by user request")
                     return
-
                 try:
                     print(f"[DEBUG] Polling for completion of task {task_id}")
                     final_reply = await poll_task_update(
@@ -206,9 +363,40 @@ async def process_conversation_background(
                     print(f"[DEBUG] Task {task_id} completed with status {final_reply.status}")
                     await record_reply(final_reply)
 
-                    # Update active task status
-                    if task_id in active_tasks:
-                        active_tasks[task_id]['status'] = final_reply.status
+                    timestamp = datetime.now(timezone.utc).isoformat()
+                    record = task_records.setdefault(
+                        task_id,
+                        {
+                            'task_id': task_id,
+                            'agent_name': agent.get('name'),
+                            'agent': dict(agent),
+                            'created_at': timestamp,
+                        },
+                    )
+                    cancel_sent = record.get('cancel_sent', False)
+                    record['status'] = final_reply.status
+                    record['updated_at'] = timestamp
+                    record.pop('cancel_error', None)
+                    if final_reply.status in TERMINAL_TASK_STATES:
+                        record['completed_at'] = timestamp
+                    record['cancel_sent'] = cancel_sent or final_reply.status == 'canceled'
+
+                    active_entry = active_tasks.setdefault(
+                        task_id,
+                        {
+                            'context_id': context_id,
+                            'agent': dict(agent),
+                            'agent_name': agent.get('name'),
+                            'created_at': timestamp,
+                        },
+                    )
+                    active_cancel_sent = active_entry.get('cancel_sent', False)
+                    active_entry['status'] = final_reply.status
+                    active_entry['updated_at'] = timestamp
+                    active_entry.pop('cancel_error', None)
+                    if final_reply.status in TERMINAL_TASK_STATES:
+                        active_entry['completed_at'] = timestamp
+                    active_entry['cancel_sent'] = active_cancel_sent or final_reply.status == 'canceled'
 
                 except Exception as exc:
                     error_text = f"Error polling task {task_id}: {exc}"
@@ -224,8 +412,15 @@ async def process_conversation_background(
                             original_sender=None,
                         )
                     )
+                    timestamp = datetime.now(timezone.utc).isoformat()
                     if task_id in active_tasks:
                         active_tasks[task_id]['status'] = 'failed'
+                        active_tasks[task_id]['updated_at'] = timestamp
+                        active_tasks[task_id]['cancel_error'] = str(exc)
+                    if task_id in task_records:
+                        task_records[task_id]['status'] = 'failed'
+                        task_records[task_id]['updated_at'] = timestamp
+                        task_records[task_id]['cancel_error'] = str(exc)
 
             # Multi-round conversation
             idx = 0
@@ -315,6 +510,9 @@ async def trigger_agents(
         "total_messages": len(context),
         "cancel_requested": False,
         "cancel_reason": None,
+        "tasks": {},
+        "last_cancel_results": [],
+        "last_cancelled_at": None,
     }
 
     # Start background processing
@@ -361,16 +559,27 @@ async def cancel_conversation(
 
     task["cancel_requested"] = True
     task["status"] = "cancel_requested"
-    task.setdefault("cancel_reason", "Cancellation requested by user.")
+    reason = task.setdefault("cancel_reason", "Cancellation requested by user.")
+    task.setdefault("tasks", {})
+
+    cancel_results = await cancel_context_tasks(context_id, reason)
+    task["last_cancel_results"] = cancel_results
+    task["last_cancelled_at"] = datetime.now(timezone.utc).isoformat()
+
+    successful_cancels = sum(1 for result in cancel_results if result.get('status') == 'cancel_requested')
+    message = "Cancellation requested."
+    if successful_cancels:
+        message = f"Cancellation requested for {successful_cancels} task(s)."
 
     return {
         "context_id": context_id,
         "status": task["status"],
-        "message": "Cancellation requested.",
+        "message": message,
         "round": task.get("round", 0),
         "max_rounds": task.get("max_rounds", 3),
         "cancel_requested": True,
         "cancel_reason": task.get("cancel_reason"),
+        "task_cancellations": cancel_results,
     }
 
 
