@@ -124,6 +124,166 @@ def render_ui() -> str:
             .message[data-status="submitted"] .spinner {
                 border-top-color: #17a2b8;
             }
+
+            /* Task group styles */
+            .task-group {
+                margin-bottom: 20px;
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                overflow: hidden;
+                background-color: #fff;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+
+            .task-group-header {
+                background-color: #f8f9fa;
+                padding: 12px 16px;
+                cursor: pointer;
+                border-bottom: 1px solid #dee2e6;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                transition: background-color 0.2s;
+                user-select: none;
+            }
+
+            .task-group-header:hover {
+                background-color: #e9ecef;
+            }
+
+            .task-group-header.expanded {
+                background-color: #e3f2fd;
+            }
+
+            .task-group-info {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                flex: 1;
+            }
+
+            .task-group-summary {
+                flex: 1;
+                font-weight: 500;
+            }
+
+            .task-group-meta {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 12px;
+                color: #666;
+            }
+
+            .task-message-count {
+                background-color: #6c757d;
+                color: white;
+                padding: 2px 6px;
+                border-radius: 10px;
+                font-size: 10px;
+                font-weight: bold;
+            }
+
+            .task-expand-icon {
+                font-size: 12px;
+                color: #6c757d;
+                transition: transform 0.2s;
+                margin-left: 8px;
+            }
+
+            .task-group-header.expanded .task-expand-icon {
+                transform: rotate(180deg);
+            }
+
+            .task-messages {
+                display: none;
+                background-color: #fff;
+            }
+
+            .task-messages.expanded {
+                display: block;
+            }
+
+            .task-message {
+                margin: 0;
+                border: none;
+                border-bottom: 1px solid #f1f3f4;
+                border-radius: 0;
+                box-shadow: none;
+                position: relative;
+                padding-left: 40px;
+            }
+
+            .task-message:last-child {
+                border-bottom: none;
+            }
+
+            .task-message::before {
+                content: '';
+                position: absolute;
+                left: 20px;
+                top: 0;
+                bottom: 0;
+                width: 2px;
+                background-color: #dee2e6;
+            }
+
+            .task-message::after {
+                content: '';
+                position: absolute;
+                left: 16px;
+                top: 20px;
+                width: 10px;
+                height: 10px;
+                background-color: #fff;
+                border: 2px solid #dee2e6;
+                border-radius: 50%;
+            }
+
+            .task-message.progress-start::after {
+                border-color: #17a2b8;
+                background-color: #17a2b8;
+            }
+
+            .task-message.progress-success::after {
+                border-color: #28a745;
+                background-color: #28a745;
+            }
+
+            .task-message.progress-error::after {
+                border-color: #dc3545;
+                background-color: #dc3545;
+            }
+
+            .task-message.final-result::after {
+                border-color: #6f42c1;
+                background-color: #6f42c1;
+            }
+
+            .standalone-message {
+                /* Regular message styling for non-task messages */
+            }
+
+            .task-controls {
+                margin-bottom: 15px;
+                display: flex;
+                gap: 10px;
+                align-items: center;
+            }
+
+            .task-controls button {
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+            }
+
+            .task-controls button:hover {
+                background-color: #545b62;
+            }
         </style>
     </head>
     <body>
@@ -158,6 +318,10 @@ def render_ui() -> str:
                     <span style="margin-left: 15px; color: #6c757d;">Rounds remaining: <span id="rounds-remaining">3</span></span>
                 </div>
                 <button class="refresh-btn" onclick="loadMessages()">Refresh Messages</button>
+                <div class="task-controls">
+                    <button onclick="expandAllTasks()">Expand All Tasks</button>
+                    <button onclick="collapseAllTasks()">Collapse All Tasks</button>
+                </div>
                 <div id="messages"></div>
             </div>
         </div>
@@ -215,6 +379,199 @@ def render_ui() -> str:
                     case 'pending': return '⏸️';
                     default: return '❓';
                 }
+            }
+
+            function groupMessagesByTask(messages) {
+                const taskGroups = new Map();
+                const standaloneMessages = [];
+
+                messages.forEach(msg => {
+                    if (msg.task_id && msg.role === 'agent') {
+                        if (!taskGroups.has(msg.task_id)) {
+                            taskGroups.set(msg.task_id, {
+                                task_id: msg.task_id,
+                                agent_name: msg.agent_name,
+                                messages: [],
+                                finalStatus: 'working',
+                                timestamp: msg.timestamp
+                            });
+                        }
+                        const group = taskGroups.get(msg.task_id);
+                        group.messages.push(msg);
+
+                        // Update final status (last message status wins)
+                        if (msg.status) {
+                            group.finalStatus = msg.status;
+                        }
+
+                        // Update timestamp to latest
+                        if (!group.timestamp || (msg.timestamp && msg.timestamp > group.timestamp)) {
+                            group.timestamp = msg.timestamp;
+                        }
+                    } else {
+                        standaloneMessages.push(msg);
+                    }
+                });
+
+                return { taskGroups: Array.from(taskGroups.values()), standaloneMessages };
+            }
+
+            function getMessageProgressType(messageText) {
+                if (messageText.includes('🔍') && messageText.includes('Starting web search')) {
+                    return 'progress-start';
+                } else if (messageText.includes('✅') && messageText.includes('Found') && messageText.includes('results')) {
+                    return 'progress-success';
+                } else if (messageText.includes('❌') && messageText.includes('failed')) {
+                    return 'progress-error';
+                } else if (messageText.includes('📭') && messageText.includes('No search results')) {
+                    return 'progress-error';
+                } else {
+                    return 'final-result';
+                }
+            }
+
+            function renderTaskGroups(taskGroups, standaloneMessages) {
+                let html = '';
+
+                // Render task groups
+                taskGroups.forEach(group => {
+                    const emoji = getEmojiForAgent(group.agent_name);
+                    const agentDisplay = group.agent_name === 'user' ? 'User' : group.agent_name;
+                    const finalStatusIcon = getStatusIcon(group.finalStatus);
+                    const timestamp = formatTimestamp(group.timestamp);
+                    const taskIdShort = group.task_id.substring(0, 8);
+
+                    // Get summary from first and last messages
+                    const firstMsg = group.messages[0];
+                    const lastMsg = group.messages[group.messages.length - 1];
+                    const isMultipleMessages = group.messages.length > 1;
+
+                    // Determine if task should be expanded by default
+                    const shouldExpand = group.finalStatus === 'working' || group.finalStatus === 'failed' || group.finalStatus === 'submitted';
+                    const expandedClass = shouldExpand ? 'expanded' : '';
+
+                    // Create summary text from first message or user message
+                    let summaryText = lastMsg.text || '';
+                    if (summaryText.length > 80) {
+                        summaryText = summaryText.substring(0, 77) + '...';
+                    }
+
+                    html += `
+                        <div class="task-group">
+                            <div class="task-group-header ${expandedClass}" onclick="toggleTaskGroup('${group.task_id}')">
+                                <div class="task-group-info">
+                                    <span class="agent-emoji">${emoji}</span>
+                                    <span class="agent-name">${agentDisplay}</span>
+                                    <span class="task-id" title="Task ID: ${group.task_id}">${taskIdShort}...</span>
+                                    <div class="task-group-summary">${summaryText}</div>
+                                </div>
+                                <div class="task-group-meta">
+                                    ${timestamp ? `<span class="timestamp">${timestamp}</span>` : ''}
+                                    ${isMultipleMessages ? `<span class="task-message-count">${group.messages.length}</span>` : ''}
+                                    <span class="status-icon" title="Status: ${group.finalStatus}">${finalStatusIcon}</span>
+                                    <span class="task-expand-icon">▼</span>
+                                </div>
+                            </div>
+                            <div class="task-messages ${expandedClass}" id="task-messages-${group.task_id}">
+                                ${renderTaskMessages(group.messages)}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                // Render standalone messages
+                standaloneMessages.forEach(msg => {
+                    html += renderStandaloneMessage(msg);
+                });
+
+                return html;
+            }
+
+            function renderTaskMessages(messages) {
+                return messages.map(msg => {
+                    const emoji = getEmojiForAgent(msg.agent_name);
+                    const timestamp = formatTimestamp(msg.timestamp);
+                    const statusIcon = getStatusIcon(msg.status);
+                    const progressType = getMessageProgressType(msg.text || '');
+
+                    return `
+                        <div class="message task-message ${msg.role} ${progressType}" data-agent="${msg.agent_name}" data-status="${msg.status}">
+                            <div class="message-header">
+                                <span class="agent-info">
+                                    <span class="agent-emoji">${emoji}</span>
+                                    <span class="agent-name">${msg.agent_name === 'user' ? 'User' : msg.agent_name}</span>
+                                </span>
+                                <span class="message-meta">
+                                    ${timestamp ? `<span class="timestamp">${timestamp}</span>` : ''}
+                                    <span class="status-icon" title="Status: ${msg.status}">${statusIcon}</span>
+                                </span>
+                            </div>
+                            <div class="message-content">${msg.text || '(no content)'}</div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            function renderStandaloneMessage(msg) {
+                const emoji = getEmojiForAgent(msg.agent_name);
+                const timestamp = formatTimestamp(msg.timestamp);
+                const statusIcon = getStatusIcon(msg.status);
+                const agentDisplay = msg.agent_name === 'user' ? 'User' : msg.agent_name;
+                const taskIdDisplay = msg.task_id ? `<span class="task-id" title="Task ID: ${msg.task_id}">${msg.task_id.substring(0, 8)}...</span>` : '';
+
+                return `
+                    <div class="message standalone-message ${msg.role}" data-agent="${msg.agent_name}" data-status="${msg.status}" ${msg.task_id ? `data-task-id="${msg.task_id}"` : ''}>
+                        <div class="message-header">
+                            <span class="agent-info">
+                                <span class="agent-emoji">${emoji}</span>
+                                <span class="agent-name">${agentDisplay}</span>
+                                ${taskIdDisplay}
+                            </span>
+                            <span class="message-meta">
+                                ${timestamp ? `<span class="timestamp">${timestamp}</span>` : ''}
+                                <span class="status-icon" title="Status: ${msg.status}">${statusIcon}</span>
+                            </span>
+                        </div>
+                        <div class="message-content">${msg.text || '(no content)'}</div>
+                    </div>
+                `;
+            }
+
+            function toggleTaskGroup(taskId) {
+                const header = document.querySelector(`[onclick="toggleTaskGroup('${taskId}')"]`);
+                const messages = document.getElementById(`task-messages-${taskId}`);
+
+                if (header && messages) {
+                    const isExpanded = header.classList.contains('expanded');
+
+                    if (isExpanded) {
+                        header.classList.remove('expanded');
+                        messages.classList.remove('expanded');
+                    } else {
+                        header.classList.add('expanded');
+                        messages.classList.add('expanded');
+                    }
+                }
+            }
+
+            function expandAllTasks() {
+                document.querySelectorAll('.task-group-header').forEach(header => {
+                    const taskId = header.getAttribute('onclick').match(/'([^']+)'/)[1];
+                    const messages = document.getElementById(`task-messages-${taskId}`);
+
+                    header.classList.add('expanded');
+                    if (messages) messages.classList.add('expanded');
+                });
+            }
+
+            function collapseAllTasks() {
+                document.querySelectorAll('.task-group-header').forEach(header => {
+                    const taskId = header.getAttribute('onclick').match(/'([^']+)'/)[1];
+                    const messages = document.getElementById(`task-messages-${taskId}`);
+
+                    header.classList.remove('expanded');
+                    if (messages) messages.classList.remove('expanded');
+                });
             }
 
             function setActiveContext(contextId) {
@@ -571,30 +928,9 @@ def render_ui() -> str:
                     }
                     lastMessagesKey = snapshotKey;
 
-                    const messagesHtml = data.messages.map(msg => {
-                        const emoji = getEmojiForAgent(msg.agent_name);
-                        const timestamp = formatTimestamp(msg.timestamp);
-                        const statusIcon = getStatusIcon(msg.status);
-                        const agentDisplay = msg.agent_name === 'user' ? 'User' : msg.agent_name;
-                        const taskIdDisplay = msg.task_id ? `<span class="task-id" title="Task ID: ${msg.task_id}">${msg.task_id.substring(0, 8)}...</span>` : '';
-
-                        return `
-                            <div class="message ${msg.role}" data-agent="${msg.agent_name}" data-status="${msg.status}" ${msg.task_id ? `data-task-id="${msg.task_id}"` : ''}>
-                                <div class="message-header">
-                                    <span class="agent-info">
-                                        <span class="agent-emoji">${emoji}</span>
-                                        <span class="agent-name">${agentDisplay}</span>
-                                        ${taskIdDisplay}
-                                    </span>
-                                    <span class="message-meta">
-                                        ${timestamp ? `<span class="timestamp">${timestamp}</span>` : ''}
-                                        <span class="status-icon" title="Status: ${msg.status}">${statusIcon}</span>
-                                    </span>
-                                </div>
-                                <div class="message-content">${msg.text || '(no content)'}</div>
-                            </div>
-                        `;
-                    }).join('');
+                    // Group messages by task ID and render them accordingly
+                    const { taskGroups, standaloneMessages } = groupMessagesByTask(data.messages);
+                    const messagesHtml = renderTaskGroups(taskGroups, standaloneMessages);
 
                     messagesDiv.innerHTML = `
                         <h3>Messages (${data.messages.length}) for context ${contextId.substring(0, 8)}...</h3>

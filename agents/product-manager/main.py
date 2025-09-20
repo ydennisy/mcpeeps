@@ -72,6 +72,7 @@ async def search_web(
             logger.info(f"Emitting start search progress for task {task_id}")
             await storage.update_task(
                 task_id,
+                state='working',
                 new_messages=[Message(
                     role="agent",
                     kind="message",
@@ -102,6 +103,7 @@ async def search_web(
                 logger.info(f"Emitting search error progress for task {task_id}")
                 await storage.update_task(
                     task_id,
+                    state='working',
                     new_messages=[Message(
                         role="agent",
                         kind="message",
@@ -122,6 +124,7 @@ async def search_web(
                 logger.info(f"Emitting no results progress for task {task_id}")
                 await storage.update_task(
                     task_id,
+                    state='working',
                     new_messages=[Message(
                         role="agent",
                         kind="message",
@@ -140,6 +143,7 @@ async def search_web(
             logger.info(f"Emitting success progress for task {task_id}")
             await storage.update_task(
                 task_id,
+                state='working',
                 new_messages=[Message(
                     role="agent",
                     kind="message",
