@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -116,15 +117,23 @@ def extract_status_text(task: dict[str, Any]) -> str | None:
     return parts_to_text(status_message.get('parts', [])) or None
 
 
-def build_agent_message(agent_name: str, text: str) -> Message:
+def build_agent_message(agent_name: str, text: str, status: str = "completed") -> Message:
     """Create an A2A message for storage in shared context."""
 
     display = f"{agent_name}: {text}" if text else f"{agent_name}: (no visible content)"
+    timestamp = datetime.now(timezone.utc).isoformat()
+
     return Message(
         role='agent',
         parts=[TextPart(text=display, kind='text')],
         kind='message',
         message_id=str(uuid.uuid4()),
+        metadata={
+            'agent_name': agent_name,
+            'raw_text': text,
+            'status': status,
+            'timestamp': timestamp,
+        }
     )
 
 
@@ -226,7 +235,7 @@ async def broadcast_agent_reply(
                     AgentReply(
                         agent_name=recipient.get('name', 'unknown'),
                         texts=[error_text],
-                        messages=[build_agent_message(recipient.get('name', 'unknown'), error_text)],
+                        messages=[build_agent_message(recipient.get('name', 'unknown'), error_text, 'failed')],
                         artifacts=[],
                         status='failed',
                         original_sender=reply.original_sender or reply.agent_name,
@@ -318,7 +327,7 @@ async def send_message_and_collect(
 
     if result.get('kind') == 'message':
         text = parts_to_text(result.get('parts', [])) or '(no visible text)'
-        message_obj = build_agent_message(agent['name'], text)
+        message_obj = build_agent_message(agent['name'], text, 'completed')
         return AgentReply(
             agent_name=agent['name'],
             texts=[text],
