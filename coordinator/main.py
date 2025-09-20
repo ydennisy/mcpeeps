@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, Form, Query
 from fastapi.responses import HTMLResponse
 from fasta2a import FastA2A, Worker
 from fasta2a.broker import InMemoryBroker
@@ -193,6 +193,11 @@ async def get_ui():
             <h2>MCPeeps Coordinator</h2>
 
             <div class="form-group">
+                <label for="context-id">Context ID (optional):</label>
+                <input type="text" id="context-id" placeholder="Leave blank to start a new context" />
+            </div>
+
+            <div class="form-group">
                 <label for="message">Message:</label>
                 <input type="text" id="message" />
             </div>
@@ -210,19 +215,30 @@ async def get_ui():
 
         <script>
             async function triggerAgents() {
-                const message = document.getElementById('message').value;
+                const contextIdInput = document.getElementById('context-id');
+                const messageInput = document.getElementById('message');
+                const contextId = contextIdInput.value.trim();
+                const message = messageInput.value;
                 const resultDiv = document.getElementById('result');
 
                 try {
+                    const params = new URLSearchParams();
+                    params.append('message', message);
+                    if (contextId) {
+                        params.append('context_id', contextId);
+                    }
+
                     const response = await fetch('/trigger', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/x-www-form-urlencoded',
                         },
-                        body: 'message=' + encodeURIComponent(message)
+                        body: params.toString()
                     });
 
                     const data = await response.json();
+
+                    contextIdInput.value = data.context_id;
 
                     resultDiv.innerHTML = `
                         <h3>Trigger Result</h3>
@@ -248,10 +264,16 @@ async def get_ui():
             }
 
             async function loadMessages() {
+                const contextId = document.getElementById('context-id').value.trim();
                 const messagesDiv = document.getElementById('messages');
 
                 try {
-                    const response = await fetch('/messages');
+                    if (!contextId) {
+                        messagesDiv.innerHTML = '<p>Provide a context ID and refresh to see messages.</p>';
+                        return;
+                    }
+
+                    const response = await fetch(`/messages?context_id=${encodeURIComponent(contextId)}`);
                     const data = await response.json();
 
                     if (data.error) {
@@ -274,7 +296,7 @@ async def get_ui():
                     `).join('');
 
                     messagesDiv.innerHTML = `
-                        <h3>Messages (${data.messages.length})</h3>
+                        <h3>Messages (${data.messages.length}) for context ${contextId.substring(0, 8)}...</h3>
                         ${messagesHtml}
                     `;
 
@@ -293,9 +315,9 @@ async def get_ui():
 
 
 @api.post("/trigger")
-async def trigger_agents(message: str = Form()):
+async def trigger_agents(message: str = Form(), context_id: str | None = Form(default=None)):
     message = message.strip()
-    context_id = f"trigger-{uuid.uuid4()}"
+    resolved_context_id = (context_id or "").strip() or f"trigger-{uuid.uuid4()}"
     agents = agent_registry.get_all_agents()
     agent_responses = []
 
@@ -307,8 +329,11 @@ async def trigger_agents(message: str = Form()):
         message_id=str(uuid.uuid4()),
     )
 
-    await storage.update_context(context_id, [user_message])
-    context_tracker.add(context_id)
+    context = await storage.load_context(resolved_context_id) or []
+    context.append(user_message)
+
+    await storage.update_context(resolved_context_id, context)
+    context_tracker.add(resolved_context_id)
 
     for agent in agents:
         try:
@@ -320,7 +345,7 @@ async def trigger_agents(message: str = Form()):
                     "message": {
                         "role": "user",
                         "parts": [{"kind": "text", "text": message}],
-                        "contextId": context_id,
+                        "contextId": resolved_context_id,
                         "kind": "message",
                         "messageId": str(uuid.uuid4())
                     },
@@ -339,6 +364,7 @@ async def trigger_agents(message: str = Form()):
                 )
                 response.raise_for_status()
                 result = response.json()
+                print(result)
                 agent_responses.append(f"{agent['name']}: {result}")
 
                 # Store agent response
@@ -349,9 +375,8 @@ async def trigger_agents(message: str = Form()):
                     message_id=str(uuid.uuid4()),
                 )
 
-                current_context = await storage.load_context(context_id) or []
-                current_context.append(agent_message)
-                await storage.update_context(context_id, current_context)
+                context.append(agent_message)
+                await storage.update_context(resolved_context_id, context)
 
         except Exception as e:
             error_msg = f"{agent['name']}: Error - {str(e)}"
@@ -365,49 +390,46 @@ async def trigger_agents(message: str = Form()):
                 message_id=str(uuid.uuid4()),
             )
 
-            current_context = await storage.load_context(context_id) or []
-            current_context.append(error_message)
-            await storage.update_context(context_id, current_context)
+            context.append(error_message)
+            await storage.update_context(resolved_context_id, context)
 
-    return {"status": "triggered", "context_id": context_id, "agents": len(agents), "responses": agent_responses}
+    return {"status": "triggered", "context_id": resolved_context_id, "agents": len(agents), "responses": agent_responses}
 
 @api.get("/messages")
-async def get_all_messages():
-    all_messages = []
+async def get_all_messages(context_id: str = Query(..., description="Context ID to load messages for")):
     try:
-        for context_id in context_tracker:
-            context = await storage.load_context(context_id)
-            if context:
-                for message in context:
-                    # Handle both Message objects and dict objects
-                    if hasattr(message, 'message_id'):
-                        # It's a Message object
-                        all_messages.append({
-                            "context_id": context_id,
-                            "message_id": message.message_id,
-                            "role": message.role,
-                            "text": message.parts[0].text if message.parts else "",
-                            "kind": message.kind
-                        })
-                    elif isinstance(message, dict):
-                        # It's a dict object
-                        all_messages.append({
-                            "context_id": context_id,
-                            "message_id": message.get('message_id', 'unknown'),
-                            "role": message.get('role', 'unknown'),
-                            "text": str(message),
-                            "kind": message.get('kind', 'unknown')
-                        })
-                    else:
-                        # Fallback for any other type
-                        all_messages.append({
-                            "context_id": context_id,
-                            "message_id": "unknown",
-                            "role": "unknown",
-                            "text": str(message),
-                            "kind": "unknown"
-                        })
-        return {"messages": all_messages}
+        context = await storage.load_context(context_id)
+        if not context:
+            return {"context_id": context_id, "messages": []}
+
+        messages = []
+        for message in context:
+            if hasattr(message, 'message_id'):
+                messages.append({
+                    "context_id": context_id,
+                    "message_id": message.message_id,
+                    "role": message.role,
+                    "text": message.parts[0].text if message.parts else "",
+                    "kind": message.kind
+                })
+            elif isinstance(message, dict):
+                messages.append({
+                    "context_id": context_id,
+                    "message_id": message.get('message_id', 'unknown'),
+                    "role": message.get('role', 'unknown'),
+                    "text": str(message),
+                    "kind": message.get('kind', 'unknown')
+                })
+            else:
+                messages.append({
+                    "context_id": context_id,
+                    "message_id": "unknown",
+                    "role": "unknown",
+                    "text": str(message),
+                    "kind": "unknown"
+                })
+
+        return {"context_id": context_id, "messages": messages}
     except Exception as e:
         return {"error": str(e), "messages": []}
 
