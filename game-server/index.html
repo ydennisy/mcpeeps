@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>McPeeps Game Server</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+        --bg: #0f172a;
+        --bg-light: #1e293b;
+        --fg: #e2e8f0;
+        --fg-dark: #1f2937;
+        --accent: #38bdf8;
+        --accent-strong: #0ea5e9;
+        --muted: rgba(148, 163, 184, 0.8);
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(160deg, rgba(56, 189, 248, 0.12), rgba(99, 102, 241, 0.12)), var(--bg);
+        color: var(--fg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 1.5rem;
+      }
+
+      .panel {
+        background: rgba(15, 23, 42, 0.72);
+        border: 1px solid rgba(148, 163, 184, 0.15);
+        border-radius: 24px;
+        backdrop-filter: blur(16px);
+        max-width: 960px;
+        width: min(100%, 960px);
+        padding: clamp(2.5rem, 4vw, 3.5rem);
+        box-shadow: 0 32px 80px rgba(15, 23, 42, 0.4);
+      }
+
+      header {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 2.5rem;
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: clamp(2.5rem, 4vw, 3.25rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+
+      header p {
+        margin: 0;
+        font-size: 1.1rem;
+        color: var(--muted);
+      }
+
+      .content {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: clamp(1.25rem, 3vw, 2rem);
+        margin-bottom: 2rem;
+      }
+
+      .card {
+        background: rgba(30, 41, 59, 0.65);
+        border: 1px solid rgba(148, 163, 184, 0.1);
+        border-radius: 18px;
+        padding: clamp(1.25rem, 3vw, 1.75rem);
+        box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.1);
+      }
+
+      .card h2 {
+        margin: 0 0 0.75rem;
+        font-size: 1.3rem;
+        color: var(--accent);
+        letter-spacing: -0.01em;
+      }
+
+      .scoreboard {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .player {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 0.75rem;
+        align-items: center;
+        background: rgba(15, 23, 42, 0.45);
+        border-radius: 12px;
+        padding: 0.85rem 1rem;
+        box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+      }
+
+      .player .badge {
+        width: 36px;
+        height: 36px;
+        border-radius: 12px;
+        background: linear-gradient(145deg, rgba(56, 189, 248, 0.65), rgba(59, 130, 246, 0.65));
+        display: grid;
+        place-items: center;
+        font-weight: 600;
+        color: var(--fg-dark);
+      }
+
+      .player .name {
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+
+      .player .score {
+        font-variant-numeric: tabular-nums;
+        font-weight: 700;
+      }
+
+      .status {
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      .status .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.95rem;
+        background: rgba(14, 165, 233, 0.18);
+        border-radius: 999px;
+        padding: 0.4rem 0.85rem;
+        color: rgba(224, 242, 254, 0.92);
+      }
+
+      .status .tag::before {
+        content: "";
+        display: inline-block;
+        width: 0.6rem;
+        height: 0.6rem;
+        border-radius: 50%;
+        background: #22d3ee;
+        box-shadow: 0 0 12px rgba(34, 211, 238, 0.65);
+      }
+
+      footer {
+        font-size: 0.9rem;
+        color: var(--muted);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.6rem;
+      }
+
+      footer code {
+        font-size: 0.85rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 6px;
+        background: rgba(148, 163, 184, 0.18);
+        color: var(--fg);
+      }
+
+      @media (max-width: 640px) {
+        .panel {
+          padding: 2rem 1.5rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <header>
+        <h1>McPeeps Game Server</h1>
+        <p>
+          This lightweight server ships with iframe-friendly defaults so you can embed it
+          in dashboards or other localhost tooling. Swap this markup for your actual game
+          UI and keep using <code>run_server.py</code> to host and tunnel it.
+        </p>
+      </header>
+
+      <div class="content">
+        <section class="card">
+          <h2>Live scoreboard</h2>
+          <div class="scoreboard" id="scoreboard"></div>
+        </section>
+
+        <section class="card status">
+          <h2>Server status</h2>
+          <div class="tag" id="status-tag">starting…</div>
+          <p>
+            The JavaScript below simulates score updates so you can see how dynamic content
+            looks when the page is embedded. Replace it with your own networking code when
+            you hook up a real backend.
+          </p>
+        </section>
+      </div>
+
+      <footer>
+        <span>Serve locally:</span>
+        <code>python run_server.py</code>
+        <span>• Tunnel with Hgrok to iframe across hosts.</span>
+      </footer>
+    </div>
+
+    <script>
+      const players = [
+        { name: "Puffin", score: 73 },
+        { name: "Otter", score: 66 },
+        { name: "Penguin", score: 58 },
+        { name: "Narwhal", score: 41 }
+      ];
+
+      const scoreboard = document.getElementById("scoreboard");
+      const statusTag = document.getElementById("status-tag");
+
+      function render() {
+        scoreboard.innerHTML = "";
+        players
+          .slice()
+          .sort((a, b) => b.score - a.score)
+          .forEach((player, index) => {
+            const wrapper = document.createElement("div");
+            wrapper.className = "player";
+            wrapper.innerHTML = `
+              <span class="badge">${index + 1}</span>
+              <span class="name">${player.name}</span>
+              <span class="score">${player.score}</span>
+            `;
+            scoreboard.appendChild(wrapper);
+          });
+      }
+
+      function tick() {
+        const randomPlayer = players[Math.floor(Math.random() * players.length)];
+        randomPlayer.score += Math.floor(Math.random() * 6);
+        render();
+      }
+
+      setTimeout(() => {
+        statusTag.textContent = "ready for connections";
+      }, 400);
+
+      render();
+      setInterval(tick, 3200);
+    </script>
+  </body>
+</html>
