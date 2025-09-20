@@ -1,168 +1,174 @@
 <template>
-  <UContainer class="py-10">
-    <div class="mx-auto flex max-w-5xl flex-col gap-8">
-      <UCard>
-        <template #header>
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <h1 class="text-3xl font-semibold">MCPeeps Coordinator</h1>
-            <UBadge variant="subtle" color="primary">{{ contextStatusText }}</UBadge>
-          </div>
-        </template>
-
-        <div class="space-y-6">
-          <div class="space-y-2">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-200" for="context-id">
-              Context ID (optional)
-            </label>
-            <div class="flex flex-col gap-2 sm:flex-row">
-              <UInput
-                id="context-id"
-                v-model="contextInput"
-                :disabled="isContextReadonly"
-                placeholder="Leave blank to start a new context"
-                class="flex-1"
-              />
-              <UButton color="gray" variant="soft" @click="startNewConversation">New Conversation</UButton>
+  <div class="mx-auto flex w-full max-w-5xl flex-col gap-8">
+    <UCard class="border-slate-200/80 bg-white/95 shadow-lg shadow-slate-200/60 backdrop-blur">
+      <template #header>
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div class="flex items-center gap-2 text-sm text-slate-500">
+              <span class="text-lg">🛰️</span>
+              <span>Orchestrate your agent missions</span>
             </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400">
-              {{ contextStatusText }}
+            <h2 class="mt-1 text-3xl font-semibold text-slate-900">MCPeeps Coordinator</h2>
+            <p class="mt-2 max-w-xl text-sm text-slate-500">
+              Keep your agents aligned, monitor their progress, and sprinkle in some fun accents 🎈
             </p>
           </div>
+          <UBadge variant="soft" color="primary" class="self-start">{{ contextStatusText }}</UBadge>
+        </div>
+      </template>
 
-          <div class="space-y-2">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-200" for="message">
-              Message
-            </label>
+      <div class="space-y-6">
+        <UFormField
+          name="context-id"
+          label="Context ID (optional)"
+          description="Leave blank to spin up a fresh conversation ✨"
+        >
+          <div class="flex flex-col gap-2 sm:flex-row">
             <UInput
-              id="message"
-              v-model="message"
-              placeholder="Type a message for all agents"
-              @keyup.enter="triggerAgents"
+              id="context-id"
+              v-model="contextInput"
+              :disabled="isContextReadonly"
+              placeholder="Try reusing a previous context ID"
+              class="flex-1"
             />
+            <UButton color="gray" variant="soft" @click="startNewConversation">New Conversation 🔁</UButton>
           </div>
-
-          <div class="flex flex-wrap gap-2">
-            <UButton color="primary" :disabled="!messageHasText" :loading="isTriggering" @click="triggerAgents">
-              Send Message
-            </UButton>
-            <UButton color="gray" variant="soft" :loading="messagesLoading" @click="manualRefresh">
-              Refresh Messages
-            </UButton>
-          </div>
-
-          <Transition name="fade">
-            <div
-              v-if="result"
-              :class="[
-                'rounded-lg border p-4 shadow-sm transition-colors dark:border-gray-700 dark:bg-gray-900/70',
-                resultCardClasses
-              ]"
-            >
-              <h3 class="text-lg font-semibold">{{ result.heading }}</h3>
-              <p v-if="result.contextId" class="mt-1 text-sm text-primary-600 dark:text-primary-300">
-                Context ID: <span class="font-mono">{{ result.contextId }}</span>
-              </p>
-              <p v-if="result.statusText" class="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">
-                {{ result.statusText }}
-              </p>
-              <p v-if="result.description" class="mt-2 text-sm text-gray-700 dark:text-gray-300">
-                {{ result.description }}
-              </p>
-              <ul
-                v-if="result.details?.length"
-                class="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-700 dark:text-gray-300"
-              >
-                <li v-for="detail in result.details" :key="detail">{{ detail }}</li>
-              </ul>
-              <div v-if="result.responses?.length" class="mt-3 rounded-md bg-white/60 p-3 text-sm shadow-sm dark:bg-gray-900/40">
-                <p class="font-medium text-gray-800 dark:text-gray-200">Responses</p>
-                <ul class="mt-1 list-disc space-y-1 pl-4 text-gray-700 dark:text-gray-300">
-                  <li v-for="response in result.responses" :key="response">{{ response }}</li>
-                </ul>
-              </div>
-              <div v-if="result.progress !== undefined" class="mt-3">
-                <div class="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-                  <div
-                    class="h-full rounded-full bg-primary-500 transition-all"
-                    :style="{ width: `${Math.min(100, Math.max(0, result.progress * 100)).toFixed(0)}%` }"
-                  ></div>
-                </div>
-              </div>
-            </div>
-          </Transition>
-        </div>
-      </UCard>
-
-      <UCard>
-        <template #header>
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 class="text-2xl font-semibold">All Messages</h2>
-              <p v-if="rounds.visible" class="text-sm text-gray-500 dark:text-gray-400">
-                Conversation rounds:
-                <span class="font-semibold text-primary-600 dark:text-primary-300">
-                  {{ rounds.completed }} / {{ rounds.max }}
-                </span>
-                <span class="ml-2">Rounds remaining: {{ roundsRemaining }}</span>
-              </p>
-            </div>
-            <UButton color="gray" variant="soft" :loading="messagesLoading" @click="manualRefresh">
-              Refresh Messages
-            </UButton>
-          </div>
-        </template>
-
-        <div class="space-y-4">
-          <UAlert
-            v-if="messagesError"
-            color="red"
-            variant="soft"
-            :title="messagesErrorTitle"
-            :description="messagesError"
-          />
-          <p v-else-if="messagesInfo" class="text-sm text-gray-500 dark:text-gray-400">
-            {{ messagesInfo }}
+          <p class="pt-1 text-xs text-slate-500">
+            {{ contextStatusText }}
           </p>
-          <div v-else class="space-y-4">
+        </UFormField>
+
+        <UFormField name="message" label="Message" description="Send a shared update to every agent 📨">
+          <UInput
+            id="message"
+            v-model="message"
+            placeholder="Type a message for all agents"
+            @keyup.enter="triggerAgents"
+          />
+        </UFormField>
+
+        <div class="flex flex-wrap gap-2">
+          <UButton color="primary" :disabled="!messageHasText" :loading="isTriggering" @click="triggerAgents">
+            Send Message 🚀
+          </UButton>
+          <UButton color="gray" variant="soft" :loading="messagesLoading" @click="manualRefresh">
+            Refresh Messages 🔄
+          </UButton>
+        </div>
+
+        <Transition name="fade">
+          <div
+            v-if="result"
+            :class="[
+              'rounded-2xl p-5 shadow-lg shadow-slate-200/50 backdrop-blur-sm',
+              resultCardClasses
+            ]"
+          >
+            <h3 class="text-lg font-semibold text-slate-900">{{ result.heading }}</h3>
+            <p v-if="result.contextId" class="mt-1 text-sm text-primary-600">
+              Context ID: <span class="font-mono">{{ result.contextId }}</span>
+            </p>
+            <p v-if="result.statusText" class="mt-2 text-sm font-medium text-slate-900">
+              {{ result.statusText }}
+            </p>
+            <p v-if="result.description" class="mt-2 text-sm text-slate-600">
+              {{ result.description }}
+            </p>
+            <ul v-if="result.details?.length" class="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">
+              <li v-for="detail in result.details" :key="detail">{{ detail }}</li>
+            </ul>
             <div
-              v-for="(messageRecord, index) in messages"
-              :key="messageKey(messageRecord, index)"
-              :class="messageCardClass(messageRecord.status, messageRecord.role)"
+              v-if="result.responses?.length"
+              class="mt-3 rounded-xl border border-slate-200/80 bg-slate-50/80 p-4 text-sm shadow-sm"
             >
-              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div class="flex items-center gap-3">
-                  <span class="text-xl">{{ getEmojiForAgent(messageRecord.agent_name) }}</span>
-                  <div class="flex flex-col">
-                    <span class="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      {{ displayAgentName(messageRecord.agent_name) }}
-                    </span>
-                    <span
-                      v-if="messageRecord.task_id"
-                      class="mt-1 inline-flex items-center gap-1 rounded bg-white/70 px-2 py-0.5 text-xs font-medium text-gray-600 shadow-sm dark:bg-gray-900/60 dark:text-gray-300"
-                    >
-                      Task ID: <span class="font-mono">{{ shortTaskId(messageRecord.task_id) }}</span>
-                    </span>
-                  </div>
-                </div>
-                <div class="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
-                  <span v-if="formatTimestamp(messageRecord.timestamp)" class="font-mono">
-                    {{ formatTimestamp(messageRecord.timestamp) }}
-                  </span>
-                  <span class="text-base" v-if="statusIcon(messageRecord.status) !== 'spinner'">
-                    {{ statusIcon(messageRecord.status) }}
-                  </span>
-                  <span v-else class="spinner" aria-hidden="true"></span>
-                </div>
+              <p class="font-medium text-slate-800">Responses</p>
+              <ul class="mt-1 list-disc space-y-1 pl-4 text-slate-600">
+                <li v-for="response in result.responses" :key="response">{{ response }}</li>
+              </ul>
+            </div>
+            <div v-if="result.progress !== undefined" class="mt-4">
+              <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                <div
+                  class="h-full rounded-full bg-primary-500 transition-all"
+                  :style="{ width: `${Math.min(100, Math.max(0, result.progress * 100)).toFixed(0)}%` }"
+                ></div>
               </div>
-              <p class="mt-3 whitespace-pre-wrap text-sm text-gray-800 dark:text-gray-200">
-                {{ messageRecord.text || '(no content)' }}
-              </p>
             </div>
           </div>
+        </Transition>
+      </div>
+    </UCard>
+
+    <UCard class="border-slate-200/80 bg-white/95 shadow-lg shadow-slate-200/60 backdrop-blur">
+      <template #header>
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div class="flex items-center gap-2 text-sm text-slate-500">
+              <span class="text-lg">📬</span>
+              <span>Live agent feed</span>
+            </div>
+            <h2 class="text-2xl font-semibold text-slate-900">All Messages</h2>
+            <p v-if="rounds.visible" class="text-sm text-slate-500">
+              Conversation rounds:
+              <span class="font-semibold text-primary-600">
+                {{ rounds.completed }} / {{ rounds.max }}
+              </span>
+              <span class="ml-2">Rounds remaining: {{ roundsRemaining }}</span>
+            </p>
+          </div>
+          <UButton color="gray" variant="soft" :loading="messagesLoading" @click="manualRefresh">
+            Refresh Messages 🔄
+          </UButton>
         </div>
-      </UCard>
-    </div>
-  </UContainer>
+      </template>
+
+      <div class="space-y-4">
+        <UAlert
+          v-if="messagesError"
+          color="red"
+          variant="soft"
+          :title="messagesErrorTitle"
+          :description="messagesError"
+        />
+        <p v-else-if="messagesInfo" class="text-sm text-slate-500">
+          {{ messagesInfo }}
+        </p>
+        <div v-else class="space-y-4">
+          <div
+            v-for="(messageRecord, index) in messages"
+            :key="messageKey(messageRecord, index)"
+            :class="messageCardClass(messageRecord.status, messageRecord.role)"
+          >
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div class="flex items-center gap-3">
+                <span class="text-xl">{{ getEmojiForAgent(messageRecord.agent_name) }}</span>
+                <div class="flex flex-col">
+                  <span class="text-sm font-semibold text-slate-900">
+                    {{ displayAgentName(messageRecord.agent_name) }}
+                  </span>
+                  <UBadge v-if="messageRecord.task_id" color="gray" variant="soft" class="mt-1 w-fit font-mono">
+                    Task ID: {{ shortTaskId(messageRecord.task_id) }}
+                  </UBadge>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 text-sm text-slate-500">
+                <span v-if="formatTimestamp(messageRecord.timestamp)" class="font-mono">
+                  {{ formatTimestamp(messageRecord.timestamp) }}
+                </span>
+                <span class="text-base" v-if="statusIcon(messageRecord.status) !== 'spinner'">
+                  {{ statusIcon(messageRecord.status) }}
+                </span>
+                <span v-else class="spinner" aria-hidden="true"></span>
+              </div>
+            </div>
+            <p class="mt-3 whitespace-pre-wrap text-sm text-slate-700">
+              {{ messageRecord.text || '(no content)' }}
+            </p>
+          </div>
+        </div>
+      </div>
+    </UCard>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -230,7 +236,7 @@ const result = ref<ResultState | null>(null)
 const isTriggering = ref(false)
 const messages = ref<CoordinatorMessage[]>([])
 const messagesLoading = ref(false)
-const messagesInfo = ref('Provide a context ID and refresh to see messages.')
+const messagesInfo = ref('Provide a context ID and refresh to see messages. ✨')
 const messagesError = ref<string | null>(null)
 const lastMessagesKey = ref('')
 const agentEmojis = ref<Record<string, string>>({ user: '👤' })
@@ -254,13 +260,13 @@ const resultCardClasses = computed(() => {
 
   switch (result.value.variant) {
     case 'success':
-      return 'border-l-4 border-l-green-500 bg-green-50 dark:bg-green-900/30'
+      return 'border border-emerald-200/80 bg-emerald-50/70'
     case 'error':
-      return 'border-l-4 border-l-red-500 bg-red-50 dark:bg-red-900/30'
+      return 'border border-rose-200/80 bg-rose-50/70'
     case 'warning':
-      return 'border-l-4 border-l-amber-500 bg-amber-50 dark:bg-amber-900/30'
+      return 'border border-amber-200/80 bg-amber-50/70'
     default:
-      return 'border-l-4 border-l-primary-500 bg-primary-50 dark:bg-primary-900/30'
+      return 'border border-primary-200/80 bg-primary-50/70'
   }
 })
 
@@ -355,37 +361,36 @@ function shortTaskId(taskId?: string | null) {
 
 function messageCardClass(status: string, role: string) {
   const classes = [
-    'rounded-xl border border-gray-200 p-4 shadow-sm transition-colors dark:border-gray-700',
-    'bg-white dark:bg-gray-900/70'
+    'rounded-2xl border border-slate-200/80 bg-white/95 p-4 shadow-sm shadow-slate-200/50 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md'
   ]
 
-  if (role === 'user') {
-    classes.push('border-l-4 border-l-primary-500 bg-primary-50 dark:bg-primary-900/30')
-  } else {
-    classes.push('border-l-4 border-l-purple-500 bg-purple-50 dark:bg-purple-900/20')
+  const highlightStatuses = ['completed', 'failed', 'working', 'submitted', 'pending']
+  if (!highlightStatuses.includes(status)) {
+    classes.push(role === 'user' ? 'ring-1 ring-sky-200/60' : 'ring-1 ring-indigo-200/60')
   }
 
   switch (status) {
     case 'completed':
-      classes.push('bg-green-50 dark:bg-green-900/20', 'border-l-green-500')
+      classes.push('border-emerald-200/80 bg-emerald-50/70 ring-1 ring-emerald-200/70')
       break
     case 'failed':
-      classes.push('bg-red-50 dark:bg-red-900/30', 'border-l-red-500')
+      classes.push('border-rose-200/80 bg-rose-50/70 ring-1 ring-rose-200/70')
       break
     case 'working':
-      classes.push('bg-amber-50 dark:bg-amber-900/30', 'border-l-amber-500')
+      classes.push('border-amber-200/80 bg-amber-50/70 ring-1 ring-amber-200/70')
       break
     case 'submitted':
-      classes.push('bg-cyan-50 dark:bg-cyan-900/30', 'border-l-cyan-500')
+      classes.push('border-cyan-200/80 bg-cyan-50/70 ring-1 ring-cyan-200/70')
       break
     case 'pending':
-      classes.push('bg-slate-50 dark:bg-slate-900/30', 'border-l-slate-500')
+      classes.push('border-slate-200/80 bg-slate-50/70 ring-1 ring-slate-200/70')
       break
     default:
-      classes.push('border-l-gray-400')
+      // Keep the soft highlight from the role indicator
+      break
   }
 
-  return Array.from(new Set(classes)).join(' ')
+  return classes.join(' ')
 }
 
 function messageKey(messageRecord: CoordinatorMessage, index: number) {
@@ -420,7 +425,7 @@ function startNewConversation() {
   message.value = ''
   result.value = null
   messages.value = []
-  messagesInfo.value = 'Provide a context ID and refresh to see messages.'
+  messagesInfo.value = 'Provide a context ID and refresh to see messages. ✨'
   messagesError.value = null
   lastMessagesKey.value = ''
   resetRoundsDisplay()
@@ -598,7 +603,7 @@ async function loadMessages(contextIdOverride?: string) {
 
   if (!contextId) {
     messages.value = []
-    messagesInfo.value = 'Provide a context ID and refresh to see messages.'
+    messagesInfo.value = 'Provide a context ID and refresh to see messages. ✨'
     messagesError.value = null
     return
   }
@@ -627,7 +632,7 @@ async function loadMessages(contextIdOverride?: string) {
 
     if (!data.messages || data.messages.length === 0) {
       messages.value = []
-      messagesInfo.value = 'No messages yet. Trigger some agents to see messages here.'
+      messagesInfo.value = 'No messages yet. Trigger some agents to see messages here. 🚀'
       return
     }
 
