@@ -11,6 +11,7 @@ class AgentRegistry:
     def __init__(self):
         self.agents = [
             {"name": "game-tester", "url": "http://localhost:8001"},
+            {"name": "swe-agent", "url": "http://localhost:8002"},
         ]
 
     def get_all_agents(self):
