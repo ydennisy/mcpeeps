@@ -93,7 +93,7 @@
       </template>
       <div class="h-96 overflow-hidden rounded-lg">
         <iframe
-          :src="iframeUrl"
+          :src="iframeSrc"
           class="h-full w-full border-0"
           title="External Content"
           sandbox="allow-scripts allow-same-origin"
@@ -220,6 +220,19 @@ interface ResultState {
 const runtimeConfig = useRuntimeConfig()
 const apiBase = (runtimeConfig.public.apiBase as string | undefined)?.replace(/\/+$/, '') ?? ''
 const iframeUrl = runtimeConfig.public.iframeUrl as string | undefined
+
+const iframeSrc = computed(() => {
+  if (!iframeUrl) return undefined
+
+  // Add ngrok skip browser warning for ngrok URLs
+  if (iframeUrl.includes('ngrok') || iframeUrl.includes('ngrok.io')) {
+    const url = new URL(iframeUrl)
+    url.searchParams.set('ngrok-skip-browser-warning', 'true')
+    return url.toString()
+  }
+
+  return iframeUrl
+})
 
 const contextInput = ref('')
 const message = ref('')
