@@ -1,0 +1,13 @@
+[project]
+name = "software-engineer"
+version = "0.1.0"
+description = "Software Engineer Agent"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "claude-code-sdk>=0.0.23",
+    "fasta2a>=0.5.0",
+    "pydantic-ai-slim[a2a,anthropic]>=1.0.10",
+    "python-dotenv>=1.1.1",
+    "uvicorn>=0.36.0",
+]
