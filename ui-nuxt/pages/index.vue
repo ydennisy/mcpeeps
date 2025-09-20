@@ -91,7 +91,7 @@
       <template #header>
         <h2 class="text-2xl font-semibold text-slate-900">Game</h2>
       </template>
-      <div class="h-96 overflow-hidden rounded-lg">
+      <div class="overflow-hidden rounded-lg" style="height: 80vh;">
         <iframe
           :src="iframeSrc"
           class="h-full w-full border-0"
