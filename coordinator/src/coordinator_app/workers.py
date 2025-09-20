@@ -7,11 +7,13 @@ from typing import Any
 
 import httpx
 from fasta2a import Worker
-from fasta2a.schema import Artifact, Message, TaskIdParams, TaskSendParams, TextPart
+from fasta2a.schema import Artifact, Message, TaskIdParams, TaskSendParams, TaskState, TextPart
 
 from .agent_comm import AgentReply, broadcast_agent_reply, build_agent_message, send_message_and_collect
 
 Context = list[Message]
+
+SummaryEntry = tuple[str, TaskState, str]
 
 
 class NetworkWorker(Worker[Context]):
@@ -61,13 +63,15 @@ class NetworkWorker(Worker[Context]):
         all_replies: list[AgentReply] = []
         new_messages: list[Message] = []
         new_artifacts: list[Artifact] = []
-        summary_lines: list[str] = []
+        summary_entries: list[SummaryEntry] = []
 
         def capture_reply(reply: AgentReply) -> None:
             if reply.texts:
-                summary_lines.extend(f"{reply.agent_name}: {text}" for text in reply.texts)
+                summary_entries.extend(
+                    (reply.agent_name, reply.status, text) for text in reply.texts
+                )
             else:
-                summary_lines.append(f"{reply.agent_name}: (no visible text)")
+                summary_entries.append((reply.agent_name, reply.status, '(no visible text)'))
             new_messages.extend(reply.messages)
             new_artifacts.extend(reply.artifacts)
             all_replies.append(reply)
@@ -102,7 +106,10 @@ class NetworkWorker(Worker[Context]):
 
         context.extend(new_messages)
 
-        print(f"Agent replies: {'; '.join(summary_lines)}")
+        summary_display = '; '.join(
+            f"{name} [{status}]: {text}" for name, status, text in summary_entries
+        )
+        print(f"Agent replies: {summary_display}")
 
         await self.storage.update_context(task['context_id'], context)
         await self.storage.update_task(

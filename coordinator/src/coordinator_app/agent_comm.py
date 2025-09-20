@@ -6,20 +6,47 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import httpx
-from fasta2a.schema import Artifact, Message, TextPart
+from fasta2a.schema import Artifact, Message, TaskState, TextPart
 
 
-TERMINAL_TASK_STATES = {
-    'completed',
-    'failed',
-    'canceled',
-    'rejected',
-    'input-required',
-    'auth-required',
-}
+ALL_TASK_STATES: set[TaskState] = cast(
+    set[TaskState],
+    {
+        'submitted',
+        'working',
+        'input-required',
+        'completed',
+        'canceled',
+        'failed',
+        'rejected',
+        'auth-required',
+        'unknown',
+    },
+)
+
+TERMINAL_TASK_STATES: set[TaskState] = cast(
+    set[TaskState],
+    {
+        'completed',
+        'failed',
+        'canceled',
+        'rejected',
+        'input-required',
+        'auth-required',
+    },
+)
+
+FAILURE_REPLY_STATES: set[TaskState] = cast(
+    set[TaskState],
+    {
+        'failed',
+        'canceled',
+        'rejected',
+    },
+)
 
 
 logger = logging.getLogger(__name__)
@@ -33,9 +60,21 @@ class AgentReply:
     texts: list[str]
     messages: list[Message]
     artifacts: list[Artifact]
-    status: str
+    status: TaskState
     task_id: str | None = None
     original_sender: str | None = None
+
+
+def normalize_task_state(state: Any) -> TaskState:
+    """Convert external task states into the canonical TaskState literal."""
+
+    if isinstance(state, str):
+        if state in ALL_TASK_STATES:
+            return cast(TaskState, state)
+        logger.warning("Received unexpected task state '%s'; defaulting to 'unknown'.", state)
+    elif state is not None:
+        logger.debug("Received non-string task state %r; defaulting to 'unknown'.", state)
+    return cast(TaskState, 'unknown')
 
 
 def parts_to_text(parts: list[dict[str, Any]]) -> str:
@@ -127,7 +166,7 @@ async def broadcast_agent_reply(
 ) -> list[AgentReply]:
     """Relay an agent's reply to peers and collect their responses synchronously."""
 
-    if reply.status in {'failed', 'canceled', 'rejected'}:
+    if reply.status in FAILURE_REPLY_STATES:
         return []
 
     # Exclude both the current agent and the original sender from recipients
@@ -230,7 +269,7 @@ async def wait_for_task_completion(
         if not isinstance(latest_task, dict):
             raise RuntimeError('Agent returned an unexpected task payload.')
 
-        state = (latest_task.get('status') or {}).get('state', 'unknown')
+        state = normalize_task_state((latest_task.get('status') or {}).get('state'))
         if state in TERMINAL_TASK_STATES:
             return latest_task
 
@@ -301,7 +340,7 @@ async def send_message_and_collect(
             poll_interval=poll_interval,
         )
 
-        state = (final_task.get('status') or {}).get('state', 'unknown')
+        state = normalize_task_state((final_task.get('status') or {}).get('state'))
         agent_texts = extract_agent_texts(final_task)
         if not agent_texts:
             status_text = extract_status_text(final_task)
