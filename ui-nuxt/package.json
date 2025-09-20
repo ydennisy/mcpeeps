@@ -1,0 +1,17 @@
+{
+  "name": "ui-nuxt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview"
+  },
+  "packageManager": "pnpm@10.5.2",
+  "devDependencies": {
+    "@nuxt/ui": "^3.3.4",
+    "nuxt": "^4.1.2"
+  }
+}
