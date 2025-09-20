@@ -1,4 +1,11 @@
 dev:
+	@set -e; \
+	mkdir -p swe-agent-output; \
+	echo "Starting game server on http://localhost:9871 serving ./swe-agent-output"; \
+	uv run python ../../game-server/run_server.py --port 9871 --directory ./swe-agent-output --no-ngrok & \
+	GS_PID=$$!; \
+	echo "Game server PID: $$GS_PID"; \
+	trap 'echo "Stopping game server ($$GS_PID)…"; kill $$GS_PID 2>/dev/null || true' EXIT; \
 	uv run uvicorn main:app --host 0.0.0.0 --port 8002 --reload
 
 test:

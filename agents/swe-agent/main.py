@@ -139,12 +139,12 @@ def _launch_static_server() -> subprocess.Popen[str] | None:
             str(STATIC_SERVER_PORT),
             "--directory",
             str(WORKDIR.resolve()),
-            "--no-placeholder",
-            "--no-spa-fallback",
+            # Force local-only to avoid requiring ngrok; server still serves locally
+            "--no-ngrok",
         ]
-        # Keep it simple: allow run_server.py defaults (tries ngrok; still serves locally)
+        # Keep it simple: serve locally without ngrok
         logger.info(
-            f"Starting static server (ngrok default behavior); port={STATIC_SERVER_PORT}; dir={WORKDIR.resolve()}"
+            f"Starting static server (local only); port={STATIC_SERVER_PORT}; dir={WORKDIR.resolve()}"
         )
         logger.info(f"Launching static server: {' '.join(cmd)}")
         _STATIC_PROC = subprocess.Popen(
@@ -202,17 +202,19 @@ def _static_server_running() -> bool:
         return False
 
 
-if not _static_server_running():
-    logger.info("Static server not detected; launching at import time…")
-    _launch_static_server()
+# Do not auto-launch at import time; Makefile handles game server in dev.
+logger.info("Static server launch deferred to app startup or Makefile.")
 
 
 # Hook into FastAPI lifespan so `uvicorn main:app --reload` also starts the server
 try:
     @app.on_event("startup")
     async def _on_startup() -> None:
-        logger.info("App startup: launching static game server if needed…")
-        _launch_static_server()
+        logger.info("App startup: ensuring static game server is running…")
+        if not _static_server_running():
+            _launch_static_server()
+        else:
+            logger.info("Static server already running; skipping launch.")
 
     @app.on_event("shutdown")
     async def _on_shutdown() -> None:
@@ -227,8 +229,9 @@ if __name__ == "__main__":
     logger.info(f"SWE agent working directory: {WORKDIR}")
     logger.info(f"API Key available: {'Yes' if os.getenv('ANTHROPIC_API_KEY') else 'No'}")
 
-    # Start the static game server (with ngrok) serving swe-agent-output on port 9871
-    _launch_static_server()
+    # Ensure the static game server is running when invoked directly.
+    if not _static_server_running():
+        _launch_static_server()
 
     logger.info(f"Starting SWE agent API on port {int(os.getenv('PORT', '8000'))}")
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
