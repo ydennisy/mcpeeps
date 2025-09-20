@@ -430,6 +430,8 @@ async def process_conversation_background(
                     mark_canceled("Canceled by user request")
                     return
 
+                replies_before_broadcast = len(collected_replies)
+
                 reply = collected_replies[idx]
                 new_replies = await broadcast_agent_reply(
                     reply=reply,
@@ -444,8 +446,8 @@ async def process_conversation_background(
                         return
                 idx += 1
 
-                # Increment round count when we've processed all current replies
-                if idx >= len(collected_replies) and new_replies:
+                # Increment round count when we've completed processing all replies from the previous round
+                if idx >= replies_before_broadcast:
                     round_count += 1
                     conversation_tasks[context_id]["round"] = round_count
 
