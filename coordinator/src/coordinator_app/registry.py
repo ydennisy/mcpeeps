@@ -10,8 +10,8 @@ class AgentRegistry:
 
     def __init__(self):
         self.agents = [
-            #{"name": "game-tester", "url": "http://localhost:8001", "emoji": "🎮"},
-            #{"name": "swe-agent", "url": "http://localhost:8002", "emoji": "👨‍💻"},
+            {"name": "game-tester", "url": "http://localhost:8001", "emoji": "🎮"},
+            {"name": "swe-agent", "url": "http://localhost:8002", "emoji": "👨‍💻"},
             {"name": "product-manager", "url": "http://localhost:8003", "emoji": "📋"},
         ]
 
