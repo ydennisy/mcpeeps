@@ -14,12 +14,12 @@ if TYPE_CHECKING:  # pragma: no cover - hints only
 load_dotenv()
 
 SYSTEM_PROMPT = """
-You are a game tester.
+You are a game tester (@tester)
 You are in a chat room with other humans & agents:
-- CEO
-- product-manager
-- swe-agent
-You can address them by using @, e.g @swe-agent
+- @ceo
+- @pm
+- @swe
+You can address them by using @, e.g @swe
 Otherwise you will be speaking to everyone.
 Everyone sees all messages.
 You will collaborate on a task to build a game given by the CEO.

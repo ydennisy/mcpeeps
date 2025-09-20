@@ -399,6 +399,13 @@ def render_ui() -> str:
                         const group = taskGroups.get(msg.task_id);
                         group.messages.push(msg);
 
+                        // Keep messages within task group sorted chronologically (oldest first)
+                        group.messages.sort((a, b) => {
+                            const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+                            const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+                            return timeA - timeB; // Ascending order (chronological within task)
+                        });
+
                         // Update final status (last message status wins)
                         if (msg.status) {
                             group.finalStatus = msg.status;
@@ -433,8 +440,22 @@ def render_ui() -> str:
             function renderTaskGroups(taskGroups, standaloneMessages) {
                 let html = '';
 
+                // Sort task groups by timestamp (most recent first)
+                const sortedTaskGroups = taskGroups.sort((a, b) => {
+                    const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+                    const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+                    return timeB - timeA; // Descending order (most recent first)
+                });
+
+                // Sort standalone messages by timestamp (most recent first)
+                const sortedStandaloneMessages = standaloneMessages.sort((a, b) => {
+                    const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+                    const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+                    return timeB - timeA; // Descending order (most recent first)
+                });
+
                 // Render task groups
-                taskGroups.forEach(group => {
+                sortedTaskGroups.forEach(group => {
                     const emoji = getEmojiForAgent(group.agent_name);
                     const agentDisplay = group.agent_name === 'user' ? 'User' : group.agent_name;
                     const finalStatusIcon = getStatusIcon(group.finalStatus);
@@ -480,7 +501,7 @@ def render_ui() -> str:
                 });
 
                 // Render standalone messages
-                standaloneMessages.forEach(msg => {
+                sortedStandaloneMessages.forEach(msg => {
                     html += renderStandaloneMessage(msg);
                 });
 
@@ -928,8 +949,15 @@ def render_ui() -> str:
                     }
                     lastMessagesKey = snapshotKey;
 
+                    // Sort messages by timestamp (most recent first) before grouping
+                    const sortedMessages = data.messages.sort((a, b) => {
+                        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+                        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+                        return timeB - timeA; // Descending order (most recent first)
+                    });
+
                     // Group messages by task ID and render them accordingly
-                    const { taskGroups, standaloneMessages } = groupMessagesByTask(data.messages);
+                    const { taskGroups, standaloneMessages } = groupMessagesByTask(sortedMessages);
                     const messagesHtml = renderTaskGroups(taskGroups, standaloneMessages);
 
                     messagesDiv.innerHTML = `
