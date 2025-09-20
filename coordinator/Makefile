@@ -1,5 +1,5 @@
 dev:
-	uv run uvicorn main:api --host 0.0.0.0 --port 8000 --reload
+	PYTHONPATH=src uv run uvicorn coordinator_app:api --host 0.0.0.0 --port 8000 --reload
 
 test:
 	curl -X POST http://localhost:8000/ \
