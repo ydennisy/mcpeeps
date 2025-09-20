@@ -358,7 +358,7 @@ async def send_message_and_collect(
         if not agent_texts:
             agent_texts = [f'(no visible text; final state: {state})']
 
-        messages = [build_agent_message(agent['name'], text) for text in agent_texts]
+        messages = [build_agent_message(agent['name'], text, state) for text in agent_texts]
         artifacts = final_task.get('artifacts', []) or []
 
         return AgentReply(

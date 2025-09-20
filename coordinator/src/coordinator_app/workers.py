@@ -54,7 +54,7 @@ class NetworkWorker(Worker[Context]):
                 reply = AgentReply(
                     agent_name=agent['name'],
                     texts=[fallback_text],
-                    messages=[build_agent_message(agent['name'], fallback_text)],
+                    messages=[build_agent_message(agent['name'], fallback_text, 'failed')],
                     artifacts=[],
                     status='failed',
                 )
@@ -94,7 +94,7 @@ class NetworkWorker(Worker[Context]):
 
         if not new_messages:
             placeholder = 'No agent responses were received.'
-            fallback_message = build_agent_message('coordinator', placeholder)
+            fallback_message = build_agent_message('coordinator', placeholder, 'completed')
             new_message_reply = AgentReply(
                 agent_name='coordinator',
                 texts=[placeholder],

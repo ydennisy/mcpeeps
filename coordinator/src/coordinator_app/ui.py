@@ -27,10 +27,58 @@ def render_ui() -> str:
             .result { margin-top: 20px; padding: 10px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; }
             .context-id { font-weight: bold; color: #28a745; }
             .messages { margin-top: 20px; }
-            .message { margin-bottom: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
-            .message.user { background-color: #e3f2fd; }
-            .message.agent { background-color: #f3e5f5; }
-            .message-header { font-weight: bold; margin-bottom: 5px; }
+            .message { margin-bottom: 15px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+            .message.user { background-color: #e3f2fd; border-left: 4px solid #2196F3; }
+            .message.agent { background-color: #f3e5f5; border-left: 4px solid #9C27B0; }
+            .message[data-status="failed"] { border-left-color: #f44336; background-color: #ffebee; }
+            .message[data-status="working"] { border-left-color: #ff9800; background-color: #fff3e0; }
+
+            .message-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 8px;
+                font-size: 14px;
+                color: #666;
+            }
+
+            .agent-info {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .agent-emoji {
+                font-size: 18px;
+            }
+
+            .agent-name {
+                font-weight: 600;
+                color: #333;
+            }
+
+            .message-meta {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 12px;
+            }
+
+            .timestamp {
+                color: #666;
+                font-family: monospace;
+            }
+
+            .status-icon {
+                font-size: 14px;
+                cursor: help;
+            }
+
+            .message-content {
+                color: #333;
+                line-height: 1.4;
+                word-wrap: break-word;
+            }
             .refresh-btn { margin-bottom: 10px; }
             .rounds-info { background-color: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
             .rounds-counter { font-weight: bold; color: #007bff; }
@@ -80,6 +128,53 @@ def render_ui() -> str:
             let messagesPoller = null;
             let conversationPoller = null;
             let lastMessagesKey = '';
+            let agentEmojis = {};
+
+            async function loadAgentEmojis() {
+                try {
+                    const response = await fetch('/agents');
+                    const data = await response.json();
+
+                    // Create emoji mapping
+                    agentEmojis = { 'user': '👤' }; // Default for user
+                    data.agents.forEach(agent => {
+                        agentEmojis[agent.name] = agent.emoji || '🤖';
+                    });
+                } catch (error) {
+                    console.error('Error loading agent emojis:', error);
+                    // Fallback emojis
+                    agentEmojis = {
+                        'user': '👤',
+                        'game-tester': '🎮',
+                        'swe-agent': '👨‍💻',
+                        'coordinator': '🎯'
+                    };
+                }
+            }
+
+            function getEmojiForAgent(agentName) {
+                return agentEmojis[agentName] || '🤖';
+            }
+
+            function formatTimestamp(timestamp) {
+                if (!timestamp) return '';
+                try {
+                    const date = new Date(timestamp);
+                    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                } catch (error) {
+                    return '';
+                }
+            }
+
+            function getStatusIcon(status) {
+                switch (status) {
+                    case 'completed': return '✅';
+                    case 'failed': return '❌';
+                    case 'working': return '⏳';
+                    case 'pending': return '⏸️';
+                    default: return '❓';
+                }
+            }
 
             function setActiveContext(contextId) {
                 const contextIdInput = document.getElementById('context-id');
@@ -341,14 +436,28 @@ def render_ui() -> str:
                     }
                     lastMessagesKey = snapshotKey;
 
-                    const messagesHtml = data.messages.map(msg => `
-                        <div class="message ${msg.role}">
-                            <div class="message-header">
-                                ${msg.role.toUpperCase()} - Context: ${msg.context_id.substring(0, 8)}...
+                    const messagesHtml = data.messages.map(msg => {
+                        const emoji = getEmojiForAgent(msg.agent_name);
+                        const timestamp = formatTimestamp(msg.timestamp);
+                        const statusIcon = getStatusIcon(msg.status);
+                        const agentDisplay = msg.agent_name === 'user' ? 'User' : msg.agent_name;
+
+                        return `
+                            <div class="message ${msg.role}" data-agent="${msg.agent_name}" data-status="${msg.status}">
+                                <div class="message-header">
+                                    <span class="agent-info">
+                                        <span class="agent-emoji">${emoji}</span>
+                                        <span class="agent-name">${agentDisplay}</span>
+                                    </span>
+                                    <span class="message-meta">
+                                        ${timestamp ? `<span class="timestamp">${timestamp}</span>` : ''}
+                                        <span class="status-icon" title="Status: ${msg.status}">${statusIcon}</span>
+                                    </span>
+                                </div>
+                                <div class="message-content">${msg.text || '(no content)'}</div>
                             </div>
-                            <div>${msg.text}</div>
-                        </div>
-                    `).join('');
+                        `;
+                    }).join('');
 
                     messagesDiv.innerHTML = `
                         <h3>Messages (${data.messages.length}) for context ${contextId.substring(0, 8)}...</h3>
@@ -367,7 +476,8 @@ def render_ui() -> str:
             }
 
             // Load messages on page load
-            document.addEventListener('DOMContentLoaded', () => {
+            document.addEventListener('DOMContentLoaded', async () => {
+                await loadAgentEmojis();
                 loadMessages();
                 startMessagesPolling();
             });

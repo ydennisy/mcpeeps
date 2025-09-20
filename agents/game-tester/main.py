@@ -105,7 +105,7 @@ async def test_game_in_browser(
     error_message: str | None = None
 
     try:
-        profile = BrowserProfile(headless=True, keep_alive=False)
+        profile = BrowserProfile(headless=False, keep_alive=False)
         browser_session = BrowserSession(browser_profile=profile)
         llm = ChatOpenAI(model='gpt-4.1-mini')
         browser_agent = BrowserUseAgent(
