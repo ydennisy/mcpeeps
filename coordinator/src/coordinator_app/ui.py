@@ -86,6 +86,41 @@ def render_ui() -> str:
                 0%, 100% { opacity: 0.6; transform: scaleX(1); }
                 50% { opacity: 1; transform: scaleX(1.1); }
             }
+
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+
+            .spinner {
+                display: inline-block;
+                width: 14px;
+                height: 14px;
+                border: 2px solid #f3f3f3;
+                border-top: 2px solid #007bff;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin-right: 6px;
+            }
+
+            .task-id {
+                font-family: monospace;
+                font-size: 11px;
+                color: #666;
+                background-color: #f8f9fa;
+                padding: 2px 6px;
+                border-radius: 3px;
+                margin-left: 6px;
+            }
+
+            .message[data-status="submitted"] {
+                border-left-color: #17a2b8;
+                background-color: #e1f7fa;
+            }
+
+            .message[data-status="submitted"] .spinner {
+                border-top-color: #17a2b8;
+            }
         </style>
     </head>
     <body>
@@ -171,6 +206,7 @@ def render_ui() -> str:
                     case 'completed': return '✅';
                     case 'failed': return '❌';
                     case 'working': return '⏳';
+                    case 'submitted': return '<span class="spinner"></span>';
                     case 'pending': return '⏸️';
                     default: return '❓';
                 }
@@ -441,13 +477,15 @@ def render_ui() -> str:
                         const timestamp = formatTimestamp(msg.timestamp);
                         const statusIcon = getStatusIcon(msg.status);
                         const agentDisplay = msg.agent_name === 'user' ? 'User' : msg.agent_name;
+                        const taskIdDisplay = msg.task_id ? `<span class="task-id" title="Task ID: ${msg.task_id}">${msg.task_id.substring(0, 8)}...</span>` : '';
 
                         return `
-                            <div class="message ${msg.role}" data-agent="${msg.agent_name}" data-status="${msg.status}">
+                            <div class="message ${msg.role}" data-agent="${msg.agent_name}" data-status="${msg.status}" ${msg.task_id ? `data-task-id="${msg.task_id}"` : ''}>
                                 <div class="message-header">
                                     <span class="agent-info">
                                         <span class="agent-emoji">${emoji}</span>
                                         <span class="agent-name">${agentDisplay}</span>
+                                        ${taskIdDisplay}
                                     </span>
                                     <span class="message-meta">
                                         ${timestamp ? `<span class="timestamp">${timestamp}</span>` : ''}

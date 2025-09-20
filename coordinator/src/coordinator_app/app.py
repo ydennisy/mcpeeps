@@ -20,6 +20,8 @@ from .agent_comm import (
     broadcast_agent_reply,
     build_agent_message,
     send_message_and_collect,
+    send_message_and_submit_task,
+    poll_task_update,
 )
 from .registry import AgentRegistry
 from .ui import render_ui
@@ -36,6 +38,9 @@ context_tracker: set[str] = set()
 
 # Track background conversation tasks
 conversation_tasks: dict[str, dict] = {}
+
+# Track active tasks for task ID -> context mapping
+active_tasks: dict[str, dict] = {}
 
 
 @asynccontextmanager
@@ -82,6 +87,34 @@ async def process_conversation_background(
             )
 
         if reply.messages:
+            # Check if this is a completed task that should replace a submitted message
+            if reply.task_id and reply.status != 'submitted':
+                print(f"[DEBUG] Looking to replace submitted message for task {reply.task_id} (status: {reply.status})")
+                # Find and replace any submitted message with the same task_id
+                replaced = False
+                for i, existing_msg in enumerate(context):
+                    # Handle both Message objects and dictionary format
+                    if hasattr(existing_msg, 'metadata'):
+                        existing_metadata = existing_msg.metadata or {}
+                    elif isinstance(existing_msg, dict):
+                        existing_metadata = existing_msg.get('metadata', {}) or {}
+                    else:
+                        continue
+
+                    if (existing_metadata.get('task_id') == reply.task_id and
+                        existing_metadata.get('status') == 'submitted'):
+                        # Replace the submitted message with the completed one
+                        print(f"[DEBUG] Replacing submitted message for task {reply.task_id} with completed message")
+                        context[i] = reply.messages[0]  # Use the first (main) message
+                        replaced = True
+                        break
+
+                if replaced:
+                    await storage.update_context(context_id, context)
+                    collected_replies.append(reply)
+                    return
+
+            # If no submitted message to replace, append normally
             context.extend(reply.messages)
             await storage.update_context(context_id, context)
             conversation_tasks[context_id]["total_messages"] += len(reply.messages)
@@ -90,15 +123,28 @@ async def process_conversation_background(
 
     try:
         async with httpx.AsyncClient() as client:
-            # Initial agent contact
+            # Initial agent contact - submit tasks immediately
+            pending_tasks = []
             for agent in agents:
                 try:
-                    reply = await send_message_and_collect(
+                    # First, submit the task and get immediate response
+                    reply = await send_message_and_submit_task(
                         agent=agent,
                         message=user_message,
                         context_id=context_id,
                         http_client=client,
                     )
+                    await record_reply(reply)
+
+                    # If it's a task, track it for polling
+                    if reply.task_id:
+                        pending_tasks.append((agent, reply.task_id))
+                        active_tasks[reply.task_id] = {
+                            'context_id': context_id,
+                            'agent': agent,
+                            'status': 'submitted'
+                        }
+
                 except Exception as exc:
                     error_text = f"Error contacting agent: {exc}"
                     error_message = build_agent_message(agent['name'], error_text, 'failed')
@@ -114,7 +160,38 @@ async def process_conversation_background(
                     )
                     continue
 
-                await record_reply(reply)
+            # Now poll for task completions
+            for agent, task_id in pending_tasks:
+                try:
+                    print(f"[DEBUG] Polling for completion of task {task_id}")
+                    final_reply = await poll_task_update(
+                        agent=agent,
+                        task_id=task_id,
+                        http_client=client,
+                    )
+                    print(f"[DEBUG] Task {task_id} completed with status {final_reply.status}")
+                    await record_reply(final_reply)
+
+                    # Update active task status
+                    if task_id in active_tasks:
+                        active_tasks[task_id]['status'] = final_reply.status
+
+                except Exception as exc:
+                    error_text = f"Error polling task {task_id}: {exc}"
+                    error_message = build_agent_message(agent['name'], error_text, 'failed')
+                    await record_reply(
+                        AgentReply(
+                            agent_name=agent['name'],
+                            texts=[error_text],
+                            messages=[error_message],
+                            artifacts=[],
+                            status='failed',
+                            task_id=task_id,
+                            original_sender=None,
+                        )
+                    )
+                    if task_id in active_tasks:
+                        active_tasks[task_id]['status'] = 'failed'
 
             # Multi-round conversation
             idx = 0
@@ -214,6 +291,17 @@ async def get_conversation_status(context_id: str = Query(..., description="Cont
     return task_info
 
 
+@api.get("/task-status")
+async def get_task_status(task_id: str = Query(..., description="Task ID to check status for")):
+    """Get the current status of an active task."""
+    if task_id not in active_tasks:
+        return {"task_id": task_id, "status": "not_found"}
+
+    task_info = active_tasks[task_id].copy()
+    task_info["task_id"] = task_id
+    return task_info
+
+
 @api.get("/agents")
 async def get_agents():
     """Get agent registry information including emojis."""
@@ -254,6 +342,7 @@ async def get_all_messages(context_id: str = Query(..., description="Context ID 
                 agent_name = metadata.get('agent_name', role)
                 status = metadata.get('status', 'completed')
                 timestamp = metadata.get('timestamp')
+                task_id = metadata.get('task_id')
 
                 # Clean up text for agent messages (remove "agent-name: " prefix)
                 raw_text = metadata.get('raw_text', text)
@@ -281,6 +370,7 @@ async def get_all_messages(context_id: str = Query(..., description="Context ID 
                 agent_name = metadata.get('agent_name', role)
                 status = metadata.get('status', 'completed')
                 timestamp = metadata.get('timestamp')
+                task_id = metadata.get('task_id')
 
                 # Clean up text
                 raw_text = metadata.get('raw_text', text)
@@ -302,6 +392,7 @@ async def get_all_messages(context_id: str = Query(..., description="Context ID 
                 "agent_name": agent_name,
                 "status": status,
                 "timestamp": timestamp,
+                "task_id": task_id,
             })
 
         return {"context_id": context_id, "messages": messages}

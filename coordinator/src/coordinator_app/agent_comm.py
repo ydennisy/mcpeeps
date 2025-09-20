@@ -125,23 +125,28 @@ def extract_status_text(task: dict[str, Any]) -> str | None:
     return parts_to_text(status_message.get('parts', [])) or None
 
 
-def build_agent_message(agent_name: str, text: str, status: str = "completed") -> Message:
+def build_agent_message(agent_name: str, text: str, status: str = "completed", task_id: str | None = None) -> Message:
     """Create an A2A message for storage in shared context."""
 
     display = f"{agent_name}: {text}" if text else f"{agent_name}: (no visible content)"
     timestamp = datetime.now(timezone.utc).isoformat()
+
+    metadata = {
+        'agent_name': agent_name,
+        'raw_text': text,
+        'status': status,
+        'timestamp': timestamp,
+    }
+
+    if task_id:
+        metadata['task_id'] = task_id
 
     return Message(
         role='agent',
         parts=[TextPart(text=display, kind='text')],
         kind='message',
         message_id=str(uuid.uuid4()),
-        metadata={
-            'agent_name': agent_name,
-            'raw_text': text,
-            'status': status,
-            'timestamp': timestamp,
-        }
+        metadata=metadata
     )
 
 
@@ -179,7 +184,7 @@ async def broadcast_agent_reply(
     agents: list[dict[str, str]],
     context_id: str,
     http_client: httpx.AsyncClient,
-    timeout: float = 30.0,
+    timeout: float = 300.0,
 ) -> list[AgentReply]:
     """Relay an agent's reply to peers and collect their responses synchronously."""
 
@@ -261,7 +266,7 @@ async def wait_for_task_completion(
     agent_url: str,
     task_id: str,
     http_client: httpx.AsyncClient,
-    poll_timeout: float = 30.0,
+    poll_timeout: float = 300.0,
     poll_interval: float = 0.5,
 ) -> Task:
     """Poll an agent until a submitted task finishes."""
@@ -278,7 +283,7 @@ async def wait_for_task_completion(
         }
         serialized_request = get_task_request_ta.dump_python(task_request, by_alias=True)
         response = await http_client.post(
-            f"{agent_url}/", json=serialized_request, timeout=poll_timeout
+            f"{agent_url}/", json=serialized_request, timeout=min(poll_timeout, 30.0)
         )
         response.raise_for_status()
         payload = get_task_response_ta.validate_python(response.json())
@@ -302,13 +307,119 @@ async def wait_for_task_completion(
         await asyncio.sleep(min(poll_interval, max(remaining, 0)))
 
 
+async def send_message_and_submit_task(
+    *,
+    agent: dict[str, str],
+    message: Message,
+    context_id: str,
+    http_client: httpx.AsyncClient,
+    poll_timeout: float = 300.0,
+) -> AgentReply:
+    """Send a message to an agent and return immediately with task submission info."""
+
+    message_payload = build_message_payload(message, context_id)
+    request_payload = {
+        'jsonrpc': '2.0',
+        'id': str(uuid.uuid4()),
+        'method': 'message/send',
+        'params': {
+            'message': message_payload,
+            'configuration': {
+                'blocking': True,
+                'acceptedOutputModes': ['text'],
+            },
+        },
+    }
+
+    response = await http_client.post(f"{agent['url']}/", json=request_payload, timeout=min(poll_timeout, 30.0))
+    response.raise_for_status()
+    payload = response.json()
+
+    if 'error' in payload:
+        error = payload['error']
+        raise RuntimeError(f"Agent error {error.get('code')}: {error.get('message')}")
+
+    result = payload.get('result')
+    if not isinstance(result, dict):
+        raise RuntimeError('Agent response missing result payload.')
+
+    if result.get('kind') == 'message':
+        text = parts_to_text(result.get('parts', [])) or '(no visible text)'
+        message_obj = build_agent_message(agent['name'], text, 'completed')
+        return AgentReply(
+            agent_name=agent['name'],
+            texts=[text],
+            messages=[message_obj],
+            artifacts=[],
+            status='completed',
+        )
+
+    if result.get('kind') == 'task':
+        task_id = result.get('id')
+        if not isinstance(task_id, str):
+            raise RuntimeError('Agent task response missing id field.')
+
+        # Return immediately with submitted status - don't wait for completion
+        pending_message = build_agent_message(agent['name'], f"Task {task_id[:8]}... submitted", 'submitted', task_id)
+        return AgentReply(
+            agent_name=agent['name'],
+            texts=[f"Task {task_id[:8]}... submitted"],
+            messages=[pending_message],
+            artifacts=[],
+            status='submitted',
+            task_id=task_id,
+        )
+
+    raise RuntimeError(f"Unsupported agent result kind: {result.get('kind')}")
+
+
+async def poll_task_update(
+    *,
+    agent: dict[str, str],
+    task_id: str,
+    http_client: httpx.AsyncClient,
+    poll_timeout: float = 300.0,
+    poll_interval: float = 0.5,
+) -> AgentReply:
+    """Poll for task completion and return the final result."""
+
+    final_task = await wait_for_task_completion(
+        agent_url=agent['url'],
+        task_id=task_id,
+        http_client=http_client,
+        poll_timeout=poll_timeout,
+        poll_interval=poll_interval,
+    )
+
+    state = normalize_task_state((final_task.get('status') or {}).get('state'))
+    agent_texts = extract_agent_texts(final_task)
+    if not agent_texts:
+        status_text = extract_status_text(final_task)
+        if status_text:
+            agent_texts = [status_text]
+    if not agent_texts:
+        agent_texts = [f'(no visible text; final state: {state})']
+
+    messages = [build_agent_message(agent['name'], text, state, task_id) for text in agent_texts]
+    artifacts = final_task.get('artifacts', []) or []
+
+    return AgentReply(
+        agent_name=agent['name'],
+        texts=agent_texts,
+        messages=messages,
+        artifacts=artifacts,
+        status=state,
+        task_id=task_id,
+    )
+
+
 async def send_message_and_collect(
     *,
     agent: dict[str, str],
     message: Message,
     context_id: str,
     http_client: httpx.AsyncClient,
-    poll_timeout: float = 30.0,
+    poll_timeout: float = 300.0,
     poll_interval: float = 0.5,
 ) -> AgentReply:
     """Send a message to an agent and gather its response in a normalized format."""
@@ -372,7 +483,7 @@ async def send_message_and_collect(
         if not agent_texts:
             agent_texts = [f'(no visible text; final state: {state})']
 
-        messages = [build_agent_message(agent['name'], text, state) for text in agent_texts]
+        messages = [build_agent_message(agent['name'], text, state, task_id) for text in agent_texts]
         artifacts = final_task.get('artifacts', []) or []
 
         return AgentReply(
@@ -385,3 +496,43 @@ async def send_message_and_collect(
         )
 
     raise RuntimeError(f"Unsupported agent result kind: {result.get('kind')}")
+
+
+async def poll_task_update(
+    *,
+    agent: dict[str, str],
+    task_id: str,
+    http_client: httpx.AsyncClient,
+    poll_timeout: float = 300.0,
+    poll_interval: float = 0.5,
+) -> AgentReply:
+    """Poll for task completion and return the final result."""
+
+    final_task = await wait_for_task_completion(
+        agent_url=agent['url'],
+        task_id=task_id,
+        http_client=http_client,
+        poll_timeout=poll_timeout,
+        poll_interval=poll_interval,
+    )
+
+    state = normalize_task_state((final_task.get('status') or {}).get('state'))
+    agent_texts = extract_agent_texts(final_task)
+    if not agent_texts:
+        status_text = extract_status_text(final_task)
+        if status_text:
+            agent_texts = [status_text]
+    if not agent_texts:
+        agent_texts = [f'(no visible text; final state: {state})']
+
+    messages = [build_agent_message(agent['name'], text, state, task_id) for text in agent_texts]
+    artifacts = final_task.get('artifacts', []) or []
+
+    return AgentReply(
+        agent_name=agent['name'],
+        texts=agent_texts,
+        messages=messages,
+        artifacts=artifacts,
+        status=state,
+        task_id=task_id,
+    )
