@@ -72,7 +72,6 @@ async def search_web(
             logger.info(f"Emitting start search progress for task {task_id}")
             await storage.update_task(
                 task_id,
-                state='working',
                 new_messages=[Message(
                     role="agent",
                     kind="message",
@@ -81,6 +80,8 @@ async def search_web(
                 )],
             )
             logger.info(f"Successfully emitted start search progress for task {task_id}")
+            # Small delay to ensure clients can see the working state
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Failed to emit start search progress for task {task_id}: {e}")
             pass  # Don't fail the search if progress update fails
@@ -101,7 +102,6 @@ async def search_web(
                 logger.info(f"Emitting search error progress for task {task_id}")
                 await storage.update_task(
                     task_id,
-                    state='working',
                     new_messages=[Message(
                         role="agent",
                         kind="message",
@@ -122,7 +122,6 @@ async def search_web(
                 logger.info(f"Emitting no results progress for task {task_id}")
                 await storage.update_task(
                     task_id,
-                    state='working',
                     new_messages=[Message(
                         role="agent",
                         kind="message",
@@ -141,7 +140,6 @@ async def search_web(
             logger.info(f"Emitting success progress for task {task_id}")
             await storage.update_task(
                 task_id,
-                state='working',
                 new_messages=[Message(
                     role="agent",
                     kind="message",
