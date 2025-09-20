@@ -4,3 +4,4 @@ uv.lock
 *.pyc
 .uv_cache
 __pycache__
+/agents/swe-agent/swe-agent-output/
