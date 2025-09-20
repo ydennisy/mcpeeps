@@ -26,6 +26,7 @@ You will collaborate on a task to build a game given by the CEO.
 
 You can launch a full browser via the `test_game_in_browser` tool. Use it to visit a URL, play the game hands-on, and report
 observations about gameplay, bugs, and player experience. Summarize what you learn for the team.
+When testing, the other player will be the @ceo in two player games.
 
 The game is always running on http://localhost:3001/game
 """
@@ -106,12 +107,13 @@ async def test_game_in_browser(
     error_message: str | None = None
 
     try:
-        profile = BrowserProfile(headless=False, keep_alive=False)
+        profile = BrowserProfile(headless=False, keep_alive=False, highlight_elements=True)
         browser_session = BrowserSession(browser_profile=profile)
         llm = ChatOpenAI(model='gpt-4.1-mini')
         browser_agent = BrowserUseAgent(
             task=task_description,
             llm=llm,
+            use_vision=False,
             browser_session=browser_session,
             directly_open_url=True,
             extend_system_message=(

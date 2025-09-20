@@ -89,7 +89,12 @@
 
     <UCard v-if="iframeUrl" class="border-slate-200/80 bg-white/95 shadow-lg shadow-slate-200/60 backdrop-blur">
       <template #header>
-        <h2 class="text-2xl font-semibold text-slate-900">Game</h2>
+        <div class="flex items-center justify-between">
+          <h2 class="text-2xl font-semibold text-slate-900">Game</h2>
+          <UButton color="gray" variant="soft" size="sm" @click="refreshIframe">
+            <span class="text-sm">🔄</span>
+          </UButton>
+        </div>
       </template>
       <div class="overflow-hidden rounded-lg" style="height: 80vh;">
         <iframe
@@ -670,6 +675,13 @@ async function loadMessages(contextIdOverride?: string) {
 
 function manualRefresh() {
   loadMessages().catch((error) => console.error('Error refreshing messages:', error))
+}
+
+function refreshIframe() {
+  const iframe = document.querySelector('iframe')
+  if (iframe) {
+    iframe.src = iframe.src
+  }
 }
 
 onMounted(async () => {

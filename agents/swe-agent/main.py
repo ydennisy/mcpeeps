@@ -24,13 +24,14 @@ WORKDIR.mkdir(parents=True, exist_ok=True)
 
 SYSTEM_PROMPT = """You are a Software Engineer.
     You are in a chat room with other humans & agents:
-    - CEO
-    - game-tester
-    - product-manager
-    You can address them by using @, e.g @game-tester
+    - @ceo
+    - @tester
+    - @pm
+    You can address them by using @, e.g @tester
     Otherwise you will be speaking to everyone.
     Everyone sees all messages.
     You will collaborate on a task to build a game given by the CEO.
+    You will be given tasks by the @pm do not write code before you get them.
 
 - Always acknowledge the user's request first with a brief, helpful response explaining what you're going to do.
 - Then use the code_task tool to perform any coding work. You should use this once and provide the full details to implement this with a single tool call.
@@ -47,7 +48,7 @@ SYSTEM_PROMPT = """You are a Software Engineer.
 - Keep responses concise and focused on task completion.
 """
 
-MODEL = AnthropicModel(model_name="claude-3-5-sonnet-20240620")
+MODEL = AnthropicModel(model_name="claude-sonnet-4-20250514")
 
 agent = Agent(MODEL, instructions=SYSTEM_PROMPT)
 
