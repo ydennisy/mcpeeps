@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -21,6 +22,9 @@ TERMINAL_TASK_STATES = {
 }
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class AgentReply:
     """Normalized response returned from an agent."""
@@ -31,6 +35,7 @@ class AgentReply:
     artifacts: list[Artifact]
     status: str
     task_id: str | None = None
+    original_sender: str | None = None
 
 
 def parts_to_text(parts: list[dict[str, Any]]) -> str:
@@ -110,6 +115,89 @@ def build_message_payload(message: Message, context_id: str) -> dict[str, Any]:
     if message.get('metadata'):
         payload['metadata'] = message['metadata']
     return payload
+
+
+async def broadcast_agent_reply(
+    *,
+    reply: AgentReply,
+    agents: list[dict[str, str]],
+    context_id: str,
+    http_client: httpx.AsyncClient,
+    timeout: float = 30.0,
+) -> list[AgentReply]:
+    """Relay an agent's reply to peers and collect their responses synchronously."""
+
+    if reply.status in {'failed', 'canceled', 'rejected'}:
+        return []
+
+    # Exclude both the current agent and the original sender from recipients
+    excluded_agents = {reply.agent_name}
+    if reply.original_sender:
+        excluded_agents.add(reply.original_sender)
+
+    recipients = [agent for agent in agents if agent.get('name') and agent['name'] not in excluded_agents]
+    if not recipients:
+        return []
+
+    texts_to_forward: list[str] = list(reply.texts)
+    if not texts_to_forward and reply.messages:
+        for message in reply.messages:
+            for part in message.parts:
+                text = getattr(part, 'text', '').strip()
+                if text:
+                    texts_to_forward.append(text)
+    if not texts_to_forward:
+        return []
+
+    collected: list[AgentReply] = []
+
+    for recipient in recipients:
+        for text in texts_to_forward:
+            if text.startswith(f"{reply.agent_name}:"):
+                outgoing_text = text
+            else:
+                outgoing_text = f"{reply.agent_name}: {text}"
+
+            outgoing_message = Message(
+                role='user',
+                parts=[TextPart(text=outgoing_text, kind='text')],
+                kind='message',
+                message_id=str(uuid.uuid4()),
+            )
+
+            try:
+                forward_reply = await send_message_and_collect(
+                    agent=recipient,
+                    message=outgoing_message,
+                    context_id=context_id,
+                    http_client=http_client,
+                    poll_timeout=timeout,
+                )
+                # Track the original sender to prevent circular messaging
+                forward_reply.original_sender = reply.original_sender or reply.agent_name
+            except Exception as exc:  # pragma: no cover - log and continue
+                logger.warning(
+                    "Failed to relay message from %s to %s: %s",
+                    reply.agent_name,
+                    recipient.get('name', '<unknown>'),
+                    exc,
+                )
+                error_text = f"Error contacting agent: {exc}"
+                collected.append(
+                    AgentReply(
+                        agent_name=recipient.get('name', 'unknown'),
+                        texts=[error_text],
+                        messages=[build_agent_message(recipient.get('name', 'unknown'), error_text)],
+                        artifacts=[],
+                        status='failed',
+                        original_sender=reply.original_sender or reply.agent_name,
+                    )
+                )
+                continue
+
+            collected.append(forward_reply)
+
+    return collected
 
 
 async def wait_for_task_completion(
@@ -235,4 +323,3 @@ async def send_message_and_collect(
         )
 
     raise RuntimeError(f"Unsupported agent result kind: {result.get('kind')}")
-

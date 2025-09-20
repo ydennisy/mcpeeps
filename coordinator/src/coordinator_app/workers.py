@@ -9,7 +9,7 @@ import httpx
 from fasta2a import Worker
 from fasta2a.schema import Artifact, Message, TaskIdParams, TaskSendParams, TextPart
 
-from .agent_comm import AgentReply, build_agent_message, send_message_and_collect
+from .agent_comm import AgentReply, broadcast_agent_reply, build_agent_message, send_message_and_collect
 
 Context = list[Message]
 
@@ -58,23 +58,47 @@ class NetworkWorker(Worker[Context]):
                 )
             agent_replies.append(reply)
 
+        all_replies: list[AgentReply] = []
         new_messages: list[Message] = []
         new_artifacts: list[Artifact] = []
         summary_lines: list[str] = []
 
-        for reply in agent_replies:
+        def capture_reply(reply: AgentReply) -> None:
             if reply.texts:
                 summary_lines.extend(f"{reply.agent_name}: {text}" for text in reply.texts)
             else:
                 summary_lines.append(f"{reply.agent_name}: (no visible text)")
             new_messages.extend(reply.messages)
             new_artifacts.extend(reply.artifacts)
+            all_replies.append(reply)
+
+        for reply in agent_replies:
+            capture_reply(reply)
+
+        idx = 0
+        while idx < len(all_replies):
+            reply = all_replies[idx]
+            new_replies = await broadcast_agent_reply(
+                reply=reply,
+                agents=agents,
+                context_id=task['context_id'],
+                http_client=self.http_client,
+            )
+            for new_reply in new_replies:
+                capture_reply(new_reply)
+            idx += 1
 
         if not new_messages:
             placeholder = 'No agent responses were received.'
             fallback_message = build_agent_message('coordinator', placeholder)
-            new_messages.append(fallback_message)
-            summary_lines.append(f"coordinator: {placeholder}")
+            new_message_reply = AgentReply(
+                agent_name='coordinator',
+                texts=[placeholder],
+                messages=[fallback_message],
+                artifacts=[],
+                status='completed',
+            )
+            capture_reply(new_message_reply)
 
         context.extend(new_messages)
 
