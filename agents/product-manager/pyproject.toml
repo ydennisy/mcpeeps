@@ -1,0 +1,12 @@
+[project]
+name = "product-manager"
+version = "0.1.0"
+description = "Product Manager Agent"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "duckduckgo-search>=6.2.0",
+    "fasta2a>=0.5.0",
+    "pydantic-ai>=1.0.10",
+    "python-dotenv>=1.1.1",
+]
