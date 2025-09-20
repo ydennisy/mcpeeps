@@ -14,6 +14,7 @@
             </div>
           </div>
           <div class="flex items-center gap-2">
+            <UButton to="/game" color="primary" variant="soft" size="sm">🎮 Game</UButton>
             <UBadge color="primary" variant="soft">Live status ✨</UBadge>
             <UBadge color="gray" variant="soft">Friendly vibes 🌈</UBadge>
           </div>

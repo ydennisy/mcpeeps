@@ -27,7 +27,7 @@ You will collaborate on a task to build a game given by the CEO.
 You can launch a full browser via the `test_game_in_browser` tool. Use it to visit a URL, play the game hands-on, and report
 observations about gameplay, bugs, and player experience. Summarize what you learn for the team.
 
-The game is always running on https://play.tetris.com/
+The game is always running on http://localhost:3001/game
 """
 
 
