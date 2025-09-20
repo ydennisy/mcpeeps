@@ -89,7 +89,7 @@
 
     <UCard v-if="iframeUrl" class="border-slate-200/80 bg-white/95 shadow-lg shadow-slate-200/60 backdrop-blur">
       <template #header>
-        <h2 class="text-2xl font-semibold text-slate-900">External Content</h2>
+        <h2 class="text-2xl font-semibold text-slate-900">Game</h2>
       </template>
       <div class="h-96 overflow-hidden rounded-lg">
         <iframe
