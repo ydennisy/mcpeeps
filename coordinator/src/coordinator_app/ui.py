@@ -21,9 +21,12 @@ def render_ui() -> str:
             .action-buttons { margin-bottom: 20px; }
             .secondary-btn { background-color: #6c757d; }
             .secondary-btn:hover { background-color: #545b62; }
+            .danger-btn { background-color: #dc3545; }
+            .danger-btn:hover { background-color: #a71d2a; }
             #context-id:read-only { background-color: #f3f3f3; cursor: not-allowed; }
             button { background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
             button:hover { background-color: #0056b3; }
+            button:disabled, .danger-btn:disabled { background-color: #c6c8ca; cursor: not-allowed; }
             .result { margin-top: 20px; padding: 10px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; }
             .context-id { font-weight: bold; color: #28a745; }
             .messages { margin-top: 20px; }
@@ -107,7 +110,8 @@ def render_ui() -> str:
             </div>
 
             <div class="action-buttons">
-                <button onclick="triggerAgents()">Send Message</button>
+                <button type="button" onclick="triggerAgents()">Send Message</button>
+                <button type="button" class="danger-btn" onclick="cancelConversation()">Kill Conversation</button>
             </div>
 
             <div id="result" class="result" style="display: none;"></div>
@@ -263,11 +267,11 @@ def render_ui() -> str:
 
                     // Show real-time status in result area
                     const resultDiv = document.getElementById('result');
-                    if (data.status === 'running') {
+                    if (data.status === 'running' || data.status === 'pending') {
                         resultDiv.innerHTML = `
                             <h3>Conversation in Progress</h3>
                             <p><span class="context-id">Context ID: ${contextId}</span></p>
-                            <p>Status: <strong>Processing...</strong></p>
+                            <p>Status: <strong>${data.status === 'pending' ? 'Starting...' : 'Processing...'}</strong></p>
                             <p>Round: <strong>${data.round || 0} / ${data.max_rounds || 3}</strong></p>
                             <p>Agents contacted: ${data.agents_contacted || 0}</p>
                             <p>Total messages: ${data.total_messages || 0}</p>
@@ -276,6 +280,27 @@ def render_ui() -> str:
                                     <div style="background-color: #28a745; height: 100%; width: ${((data.round || 0) / (data.max_rounds || 3)) * 100}%; transition: width 0.3s;"></div>
                                 </div>
                             </div>
+                        `;
+                    } else if (data.status === 'cancel_requested') {
+                        resultDiv.innerHTML = `
+                            <h3>Cancellation Requested</h3>
+                            <p><span class="context-id">Context ID: ${contextId}</span></p>
+                            <p>Status: <strong>Waiting for agents to stop...</strong></p>
+                            <p>Round: <strong>${data.round || 0} / ${data.max_rounds || 3}</strong></p>
+                            <p>Agents contacted: ${data.agents_contacted || 0}</p>
+                            <p>Total messages: ${data.total_messages || 0}</p>
+                            <p>${data.cancel_reason || 'Cancellation requested by user.'}</p>
+                        `;
+                    } else if (data.status === 'canceled') {
+                        stopConversationPolling();
+                        resultDiv.innerHTML = `
+                            <h3>Conversation Canceled</h3>
+                            <p><span class="context-id">Context ID: ${contextId}</span></p>
+                            <p>Status: <strong>Canceled</strong></p>
+                            <p>Round processed: <strong>${data.round || 0}</strong></p>
+                            <p>Agents contacted: ${data.agents_contacted || 0}</p>
+                            <p>Total messages: ${data.total_messages || 0}</p>
+                            <p>${data.cancel_reason || 'Canceled by user request.'}</p>
                         `;
                     } else if (data.status === 'completed') {
                         stopConversationPolling();
@@ -395,6 +420,79 @@ def render_ui() -> str:
                     stopMessagesPolling();
                     stopConversationPolling();
                     resultDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+                    resultDiv.style.display = 'block';
+                }
+            }
+
+            async function cancelConversation() {
+                const contextIdInput = document.getElementById('context-id');
+                const manualContextId = contextIdInput.value.trim();
+                const contextId = currentContextId || manualContextId;
+                const resultDiv = document.getElementById('result');
+
+                if (!contextId) {
+                    resultDiv.innerHTML = '<p style="color: red;">No active context to cancel.</p>';
+                    resultDiv.style.display = 'block';
+                    return;
+                }
+
+                try {
+                    const params = new URLSearchParams();
+                    params.append('context_id', contextId);
+
+                    const response = await fetch('/cancel', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: params.toString(),
+                    });
+
+                    const data = await response.json();
+                    setActiveContext(contextId);
+
+                    if (data.round !== undefined && data.max_rounds !== undefined) {
+                        updateRoundsDisplay(data.round || 0, data.max_rounds || 3);
+                    }
+
+                    if (data.status === 'error') {
+                        resultDiv.innerHTML = `<p style="color: red;">${data.message || 'Unable to cancel conversation.'}</p>`;
+                    } else if (data.status === 'not_found') {
+                        resultDiv.innerHTML = `<p style="color: red;">${data.message || 'No running conversation found for this context.'}</p>`;
+                    } else if (data.status === 'cancel_requested') {
+                        resultDiv.innerHTML = `
+                            <h3>Cancellation Requested</h3>
+                            <p><span class="context-id">Context ID: ${contextId}</span></p>
+                            <p>Status: <strong>Waiting for agents to stop...</strong></p>
+                            <p>${data.cancel_reason || 'Cancellation requested by user.'}</p>
+                        `;
+                        startConversationPolling(contextId);
+                    } else if (data.status === 'canceled') {
+                        stopConversationPolling();
+                        resultDiv.innerHTML = `
+                            <h3>Conversation Canceled</h3>
+                            <p><span class="context-id">Context ID: ${contextId}</span></p>
+                            <p>Status: <strong>Canceled</strong></p>
+                            <p>${data.cancel_reason || 'Canceled by user request.'}</p>
+                        `;
+                    } else if (data.status === 'completed' || data.status === 'failed') {
+                        stopConversationPolling();
+                        resultDiv.innerHTML = `
+                            <h3>Conversation Already ${data.status === 'completed' ? 'Completed' : 'Failed'}</h3>
+                            <p><span class="context-id">Context ID: ${contextId}</span></p>
+                            <p>Status: <strong>${data.status}</strong></p>
+                        `;
+                    } else {
+                        resultDiv.innerHTML = `
+                            <h3>Cancellation Status</h3>
+                            <p>Status: ${data.status}</p>
+                        `;
+                    }
+
+                    resultDiv.style.display = 'block';
+                    await loadMessages(contextId);
+                } catch (error) {
+                    resultDiv.innerHTML = `<p style="color: red;">Error requesting cancellation: ${error.message}</p>`;
                     resultDiv.style.display = 'block';
                 }
             }

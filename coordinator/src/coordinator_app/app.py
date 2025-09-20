@@ -57,18 +57,44 @@ async def process_conversation_background(
 ) -> None:
     """Process agent conversation in the background with real-time updates."""
 
-    # Initialize task status
-    conversation_tasks[context_id] = {
-        "status": "running",
+    existing_task = conversation_tasks.get(context_id)
+    cancel_requested_initial = bool(existing_task and existing_task.get("cancel_requested"))
+    cancel_reason_initial = existing_task.get("cancel_reason") if existing_task else None
+
+    task_state = {
+        "status": "cancel_requested" if cancel_requested_initial else "running",
         "round": 0,
         "max_rounds": 3,
         "agents_contacted": len(agents),
         "responses": [],
         "total_messages": 0,
+        "cancel_requested": cancel_requested_initial,
+        "cancel_reason": cancel_reason_initial,
     }
+    conversation_tasks[context_id] = task_state
 
     context = await storage.load_context(context_id) or []
     collected_replies: list[AgentReply] = []
+
+    round_count = 0
+    max_rounds = task_state["max_rounds"]
+
+    def is_cancel_requested() -> bool:
+        task = conversation_tasks.get(context_id)
+        return bool(task and task.get("cancel_requested"))
+
+    def mark_canceled(reason: str) -> None:
+        task = conversation_tasks.get(context_id)
+        if not task:
+            return
+        task["status"] = "canceled"
+        task["cancel_requested"] = True
+        task["cancel_reason"] = reason
+        task["round"] = round_count
+
+    if cancel_requested_initial:
+        mark_canceled(cancel_reason_initial or "Canceled by user request")
+        return
 
     async def record_reply(reply: AgentReply) -> None:
         # Update task status
@@ -92,6 +118,10 @@ async def process_conversation_background(
         async with httpx.AsyncClient() as client:
             # Initial agent contact
             for agent in agents:
+                if is_cancel_requested():
+                    mark_canceled("Canceled by user request")
+                    return
+
                 try:
                     reply = await send_message_and_collect(
                         agent=agent,
@@ -118,10 +148,12 @@ async def process_conversation_background(
 
             # Multi-round conversation
             idx = 0
-            round_count = 0
-            max_rounds = 3
 
             while idx < len(collected_replies) and round_count < max_rounds:
+                if is_cancel_requested():
+                    mark_canceled("Canceled by user request")
+                    return
+
                 reply = collected_replies[idx]
                 new_replies = await broadcast_agent_reply(
                     reply=reply,
@@ -131,6 +163,9 @@ async def process_conversation_background(
                 )
                 for new_reply in new_replies:
                     await record_reply(new_reply)
+                    if is_cancel_requested():
+                        mark_canceled("Canceled by user request")
+                        return
                 idx += 1
 
                 # Increment round count when we've processed all current replies
@@ -187,6 +222,18 @@ async def trigger_agents(
     await storage.update_context(resolved_context_id, context)
     context_tracker.add(resolved_context_id)
 
+    # Initialize task entry immediately so cancellation can be requested before processing starts
+    conversation_tasks[resolved_context_id] = {
+        "status": "pending",
+        "round": 0,
+        "max_rounds": 3,
+        "agents_contacted": len(agents),
+        "responses": [],
+        "total_messages": len(context),
+        "cancel_requested": False,
+        "cancel_reason": None,
+    }
+
     # Start background processing
     background_tasks.add_task(
         process_conversation_background,
@@ -200,6 +247,47 @@ async def trigger_agents(
         "context_id": resolved_context_id,
         "agents": len(agents),
         "message": "Conversation processing started in background"
+    }
+
+
+@api.post("/cancel")
+async def cancel_conversation(
+    context_id: str = Form(..., description="Context ID to cancel")
+):
+    """Request cancellation of a running conversation."""
+
+    context_id = context_id.strip()
+    if not context_id:
+        return {"status": "error", "message": "context_id is required"}
+
+    task = conversation_tasks.get(context_id)
+    if not task:
+        return {"context_id": context_id, "status": "not_found", "message": "No conversation found for this context."}
+
+    status = task.get("status")
+    if status in {"completed", "failed", "canceled"}:
+        return {
+            "context_id": context_id,
+            "status": status,
+            "message": f"Conversation already {status}.",
+            "round": task.get("round", 0),
+            "max_rounds": task.get("max_rounds", 3),
+            "cancel_requested": task.get("cancel_requested", False),
+            "cancel_reason": task.get("cancel_reason"),
+        }
+
+    task["cancel_requested"] = True
+    task["status"] = "cancel_requested"
+    task.setdefault("cancel_reason", "Cancellation requested by user.")
+
+    return {
+        "context_id": context_id,
+        "status": task["status"],
+        "message": "Cancellation requested.",
+        "round": task.get("round", 0),
+        "max_rounds": task.get("max_rounds", 3),
+        "cancel_requested": True,
+        "cancel_reason": task.get("cancel_reason"),
     }
 
 
