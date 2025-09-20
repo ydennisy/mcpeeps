@@ -1,0 +1,11 @@
+node_modules
+.nitro
+.nuxt
+.output
+.cache
+.DS_Store
+.env
+.env.*
+.idea
+.vscode
+*.log
