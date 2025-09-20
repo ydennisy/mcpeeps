@@ -9,7 +9,15 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 import httpx
-from fasta2a.schema import Artifact, Message, TaskState, TextPart
+from fasta2a.schema import Artifact, GetTaskRequest, Message, Task, TaskState, TextPart
+
+try:  # pragma: no cover - compatibility for older schema versions
+    from fasta2a.schema import get_task_request_ta, get_task_response_ta
+except ImportError:  # pragma: no cover - fallback when type adapters are unavailable
+    from fasta2a.schema import GetTaskResponse, TypeAdapter
+
+    get_task_request_ta = TypeAdapter(GetTaskRequest)
+    get_task_response_ta = TypeAdapter(GetTaskResponse)
 
 
 ALL_TASK_STATES: set[TaskState] = cast(
@@ -246,28 +254,34 @@ async def wait_for_task_completion(
     http_client: httpx.AsyncClient,
     poll_timeout: float = 30.0,
     poll_interval: float = 0.5,
-) -> dict[str, Any]:
+) -> Task:
     """Poll an agent until a submitted task finishes."""
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + poll_timeout
 
     while True:
-        task_request = {
+        task_request: GetTaskRequest = {
             'jsonrpc': '2.0',
             'id': str(uuid.uuid4()),
             'method': 'tasks/get',
             'params': {'id': task_id},
         }
-        response = await http_client.post(f"{agent_url}/", json=task_request, timeout=poll_timeout)
+        serialized_request = get_task_request_ta.dump_python(task_request, by_alias=True)
+        response = await http_client.post(
+            f"{agent_url}/", json=serialized_request, timeout=poll_timeout
+        )
         response.raise_for_status()
-        payload = response.json()
-        if 'error' in payload:
-            raise RuntimeError(f"Agent returned error while fetching task: {payload['error']}")
+        payload = get_task_response_ta.validate_python(response.json())
 
-        latest_task = payload.get('result')
-        if not isinstance(latest_task, dict):
-            raise RuntimeError('Agent returned an unexpected task payload.')
+        error = payload.get('error')
+        if error:
+            raise RuntimeError(f"Agent returned error while fetching task: {error}")
+
+        result = payload.get('result')
+        if result is None:
+            raise RuntimeError('Agent response missing task payload.')
+        latest_task = cast(Task, result)
 
         state = normalize_task_state((latest_task.get('status') or {}).get('state'))
         if state in TERMINAL_TASK_STATES:
