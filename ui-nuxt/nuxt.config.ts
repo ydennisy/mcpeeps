@@ -5,12 +5,13 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   runtimeConfig: {
     public: {
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || ''
+      apiBase: 'http://localhost:8000'
     }
   },
   app: {
     head: {
-      title: 'MCPeeps Coordinator'
+      title: 'The Boardroom'
     }
-  }
+  },
+  css: ['~/assets/css/main.css'],
 })
