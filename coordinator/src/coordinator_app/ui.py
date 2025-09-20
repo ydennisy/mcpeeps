@@ -181,6 +181,7 @@ def render_ui() -> str:
                     agentEmojis = {
                         'user': '👤',
                         'game-tester': '🎮',
+                        'product-manager': '📋',
                         'swe-agent': '👨‍💻',
                         'coordinator': '🎯'
                     };
