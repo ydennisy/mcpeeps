@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, Form, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fasta2a import FastA2A
 from fasta2a.broker import InMemoryBroker
@@ -61,6 +62,15 @@ async def lifespan(a2a_app: FastA2A) -> AsyncIterator[None]:
 a2a_app = FastA2A(storage=storage, broker=broker, lifespan=lifespan)
 
 api = FastAPI(title="MCPeeps")
+
+# Add CORS middleware to allow all origins
+api.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 async def cancel_context_tasks(context_id: str, reason: str | None = None) -> list[dict[str, Any]]:

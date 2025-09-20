@@ -3,16 +3,6 @@
     <UCard class="border-slate-200/80 bg-white/95 shadow-lg shadow-slate-200/60 backdrop-blur">
       <template #header>
         <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div class="flex items-center gap-2 text-sm text-slate-500">
-              <span class="text-lg">🛰️</span>
-              <span>Orchestrate your agent missions</span>
-            </div>
-            <h2 class="mt-1 text-3xl font-semibold text-slate-900">MCPeeps Coordinator</h2>
-            <p class="mt-2 max-w-xl text-sm text-slate-500">
-              Keep your agents aligned, monitor their progress, and sprinkle in some fun accents 🎈
-            </p>
-          </div>
           <UBadge variant="soft" color="primary" class="self-start">{{ contextStatusText }}</UBadge>
         </div>
       </template>
@@ -39,22 +29,20 @@
         </UFormField>
 
         <UFormField name="message" label="Message" description="Send a shared update to every agent 📨">
-          <UInput
-            id="message"
-            v-model="message"
-            placeholder="Type a message for all agents"
-            @keyup.enter="triggerAgents"
-          />
+          <div class="flex gap-2">
+            <UInput
+              id="message"
+              v-model="message"
+              placeholder="Type a message for all agents"
+              class="flex-1"
+              @keyup.enter="triggerAgents"
+            />
+            <UButton color="primary" :disabled="!messageHasText" :loading="isTriggering" @click="triggerAgents">
+              Send Message 🚀
+            </UButton>
+          </div>
         </UFormField>
 
-        <div class="flex flex-wrap gap-2">
-          <UButton color="primary" :disabled="!messageHasText" :loading="isTriggering" @click="triggerAgents">
-            Send Message 🚀
-          </UButton>
-          <UButton color="gray" variant="soft" :loading="messagesLoading" @click="manualRefresh">
-            Refresh Messages 🔄
-          </UButton>
-        </div>
 
         <Transition name="fade">
           <div
@@ -99,26 +87,31 @@
       </div>
     </UCard>
 
+    <UCard v-if="iframeUrl" class="border-slate-200/80 bg-white/95 shadow-lg shadow-slate-200/60 backdrop-blur">
+      <template #header>
+        <h2 class="text-2xl font-semibold text-slate-900">External Content</h2>
+      </template>
+      <div class="h-96 overflow-hidden rounded-lg">
+        <iframe
+          :src="iframeUrl"
+          class="h-full w-full border-0"
+          title="External Content"
+          sandbox="allow-scripts allow-same-origin"
+        />
+      </div>
+    </UCard>
+
     <UCard class="border-slate-200/80 bg-white/95 shadow-lg shadow-slate-200/60 backdrop-blur">
       <template #header>
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div class="flex items-center gap-2 text-sm text-slate-500">
-              <span class="text-lg">📬</span>
-              <span>Live agent feed</span>
-            </div>
-            <h2 class="text-2xl font-semibold text-slate-900">All Messages</h2>
-            <p v-if="rounds.visible" class="text-sm text-slate-500">
-              Conversation rounds:
-              <span class="font-semibold text-primary-600">
-                {{ rounds.completed }} / {{ rounds.max }}
-              </span>
-              <span class="ml-2">Rounds remaining: {{ roundsRemaining }}</span>
-            </p>
-          </div>
-          <UButton color="gray" variant="soft" :loading="messagesLoading" @click="manualRefresh">
-            Refresh Messages 🔄
-          </UButton>
+        <div>
+          <h2 class="text-2xl font-semibold text-slate-900">Chat</h2>
+          <p v-if="rounds.visible" class="text-sm text-slate-500">
+            Conversation rounds:
+            <span class="font-semibold text-primary-600">
+              {{ rounds.completed }} / {{ rounds.max }}
+            </span>
+            <span class="ml-2">Rounds remaining: {{ roundsRemaining }}</span>
+          </p>
         </div>
       </template>
 
@@ -161,8 +154,7 @@
                 <span v-else class="spinner" aria-hidden="true"></span>
               </div>
             </div>
-            <p class="mt-3 whitespace-pre-wrap text-sm text-slate-700">
-              {{ messageRecord.text || '(no content)' }}
+            <p class="mt-3 whitespace-pre-wrap text-sm text-slate-700" v-html="highlightMentions(messageRecord.text || '(no content)')">
             </p>
           </div>
         </div>
@@ -227,6 +219,7 @@ interface ResultState {
 
 const runtimeConfig = useRuntimeConfig()
 const apiBase = (runtimeConfig.public.apiBase as string | undefined)?.replace(/\/+$/, '') ?? ''
+const iframeUrl = runtimeConfig.public.iframeUrl as string | undefined
 
 const contextInput = ref('')
 const message = ref('')
@@ -395,6 +388,21 @@ function messageCardClass(status: string, role: string) {
 
 function messageKey(messageRecord: CoordinatorMessage, index: number) {
   return `${messageRecord.task_id || 'task'}-${messageRecord.timestamp || index}-${index}`
+}
+
+function highlightMentions(text: string): string {
+  if (!text) return text
+
+  // Escape HTML entities first to prevent XSS
+  const escapedText = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+
+  // Highlight @ mentions with blue color
+  return escapedText.replace(/@(\w+)/g, '<span style="color: #3b82f6; font-weight: 500;">@$1</span>')
 }
 
 function setActiveContext(contextId?: string | null) {
