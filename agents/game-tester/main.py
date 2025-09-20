@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 
 from browser_use import Agent as BrowserUseAgent
 from browser_use import BrowserProfile, BrowserSession, ChatOpenAI
@@ -78,7 +78,12 @@ agent = Agent('openai:gpt-4.1', instructions=SYSTEM_PROMPT)
 
 
 @agent.tool
-async def test_game_in_browser(url: str, objective: str | None = None, max_steps: int = 40) -> str:
+async def test_game_in_browser(
+    _ctx: RunContext[None],
+    url: str,
+    objective: str | None = None,
+    max_steps: int = 40,
+) -> str:
     """Play a web-hosted game via browser-use and summarize the findings."""
 
     focus = (
